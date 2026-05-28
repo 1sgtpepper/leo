@@ -935,6 +935,17 @@ pub(crate) fn no_inline_not_allowed_on_final_fn(span: Span) -> Formatted {
         .with_help("Remove the `@no_inline` annotation. `final fn`s must always be inlined.")
 }
 
+pub(crate) fn no_inline_not_allowed_on_underscore_fn(span: Span) -> Formatted {
+    Formatted::error(
+        CODE_PREFIX,
+        CODE_MASK + 192,
+        "`@no_inline` is not allowed on a function whose name starts with `_`",
+        span,
+    )
+    .with_note("A leading `_` forces the function to be inlined, so it cannot also opt out of inlining.")
+    .with_help("Remove the `@no_inline` annotation or rename the function so it does not start with `_`.")
+}
+
 pub(crate) fn record_captured_by_final_block(var_name: impl Display, span: Span) -> Formatted {
     Formatted::error(
         CODE_PREFIX,

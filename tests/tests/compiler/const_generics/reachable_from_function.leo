@@ -2,7 +2,7 @@ program const_generics.aleo {
     fn foo() {}
 }
 
-fn bar(x: field) -> field {
+fn _bar(_x: field) -> field {
     return abc::[0]();
 }
 

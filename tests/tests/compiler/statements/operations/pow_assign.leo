@@ -8,7 +8,7 @@ program test.aleo {
     }
 }
 
-fn signed(a: i8, b: u8, c: u16, d: u32) -> i8 {
+fn _signed(a: i8, b: u8, c: u16, d: u32) -> i8 {
     a **= b;
     a **= c;
     a **= d;

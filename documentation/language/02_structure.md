@@ -4,7 +4,7 @@ title: Structure of a Leo Program
 sidebar_label: Program Structure
 ---
 
-[general tags]: # "program, constant, import, record, struct, mapping"
+[general tags]: # "program, constant, import, record, struct, mapping, identifiers, naming, underscore"
 
 ## Layout of a Leo Program
 
@@ -13,10 +13,117 @@ A Leo program contains declarations of a [Program](#program), [Constants](#const
 Declarations are locally accessible within a program file.
 If you need a declaration from another Leo file, you must import it.
 
+## Identifiers
+
+All Leo identifiers — program names, function names, variables, struct and
+record names, fields, mappings, storage variables, constants, and interface
+names — share a common shape, with extra restrictions for identifiers whose
+name reaches the compiled Aleo bytecode.
+
+### General rules
+
+A Leo identifier:
+
+- Begins with an ASCII letter (`a`–`z`, `A`–`Z`) or, in the positions listed
+  below, a single underscore (`_`).
+- Continues with ASCII letters, digits (`0`–`9`), and single underscores.
+- Cannot contain a double underscore (`__`).
+- Cannot be exactly equal to a Leo keyword (`let`, `const`, `fn`, `record`,
+  `mapping`, `program`, …), a SnarkVM reserved keyword, or the literal `aleo`.
+- Cannot match a bare-callable intrinsic name (`_self_caller`, `_block_height`,
+  …). The parser dispatches an intrinsic call before any scope lookup, so a
+  same-named local would be silently shadowed and is rejected at compile time.
+
+Two additional restrictions apply only to identifiers whose name is emitted
+into the Aleo bytecode:
+
+- **Program names, record names, and record member names** cannot contain the
+  substring `aleo` anywhere (e.g. `my_aleo_token` is rejected). This rule does
+  not apply to struct names or to identifiers below the bytecode boundary
+  (locals, parameters, helper functions, mappings, storage variables).
+- A leading underscore is rejected in these positions; see
+  [Leading underscore](#leading-underscore-_) below.
+
+For the conventional casing of each kind of identifier (CamelCase vs.
+snake_case), see [Naming Conventions](./07_style.md#naming-conventions). This
+section describes only what the compiler accepts.
+
+### Leading underscore (`_`)
+
+Leo follows `rustc`'s `_x` convention for marking a binding "intentionally
+unused" and silencing the matching
+[`UNU` warning](./09_diagnostics.md#the-unu-family--unused-items). Whether a
+leading `_` is permitted depends on whether the name is emitted into the
+compiled Aleo bytecode. snarkVM identifiers must start with a letter, so any
+Leo identifier that reaches the bytecode must also start with a letter — Leo
+rejects the bad cases at compile time rather than letting them surface as a
+deploy-time failure.
+
+**Allowed positions** (silences the corresponding `unused_*` warning):
+
+| Position                                                                | Silences           |
+| ----------------------------------------------------------------------- | ------------------ |
+| Local `let` binding                                                     | `unused_variable`  |
+| Tuple-pattern element                                                   | `unused_variable`  |
+| Local `const`                                                           | `unused_const`     |
+| Top-level / module-scope `const`                                        | `unused_const`     |
+| Loop iteration variable                                                 | `unused_variable`  |
+| Function parameter on a non-entry, non-`@test` function                 | `unused_variable`  |
+| Const-generic parameter                                                 | `unused_variable`  |
+| Free `fn` name (force-inlined; the name never reaches the VM)           | `unused_function`  |
+| `final fn` name (always inlined)                                        | `unused_function`  |
+| Interface name (Leo-only, no bytecode emission)                         | n/a                |
+
+**Rejected positions** — every identifier whose name is emitted verbatim into
+the Aleo bytecode:
+
+- Program names (e.g. `program _foo.aleo`)
+- Entry-point function names (`fn` inside `program { … }`)
+- Struct and record names
+- Struct and record field names
+- Mapping names
+- Storage variable names
+
+**Rejected for other reasons:**
+
+- A binding whose name matches a bare-callable intrinsic (`_self_caller`,
+  `_block_height`, etc.) is rejected by the parser.
+- A free `fn` annotated with `@no_inline` and given a `_`-prefixed name is
+  rejected by the type checker: `@no_inline` keeps the name in the bytecode,
+  which contradicts the `_`-prefix silencing marker.
+
+**Reading a `_`-prefixed binding** defeats the silencing intent and emits the
+`used underscore binding` warning. Either remove the leading `_` or stop
+reading the binding.
+
+### Program name (program ID)
+
+A program ID is declared as `{name}.{network}` and follows the general rules
+above with two additional restrictions:
+
+- The `name` may only contain lowercase letters, digits, and single
+  underscores — uppercase letters are not permitted.
+- The `name` cannot contain the substring `aleo` anywhere.
+
+Currently, `aleo` is the only supported `network` domain.
+
+```leo showLineNumbers
+program hello.aleo;     // valid
+
+program Foo.aleo;       // invalid — uppercase letter
+program baR.aleo;       // invalid — uppercase letter
+program 0foo.aleo;      // invalid — leading digit
+program 0_foo.aleo;     // invalid — leading digit
+program _foo.aleo;      // invalid — leading underscore
+program foo__bar.aleo;  // invalid — double underscore
+program aleo.aleo;      // invalid — contains `aleo`
+program my_aleo.aleo;   // invalid — contains `aleo`
+```
+
 ### Program
 
 A program is a collection of code (its functions) and data (its types) that resides at a
-[program ID](#program-id) on the Aleo blockchain. A program is declared as `program {name}.{network} { ... }`.
+[program ID](#program-name-program-id) on the Aleo blockchain. A program is declared as `program {name}.{network} { ... }`.
 The body of the program is delimited by curly braces `{}`.
 
 ```leo file=../code_snippets/layout/main_example/src/main.leo#file
@@ -37,24 +144,8 @@ The following must be declared outside the scope of a program in a Leo file:
 - `final fn` definitions
 - `interface` definitions
 
-#### Program ID
-
-A program ID is declared as `{name}.{network}`.
-
-The first character of a `name` must be a lowercase letter.
-`name` can only contain lowercase letters, numbers, and underscores, and must not contain a double underscore (`__`) or the keyword `aleo` in it.
-
-Currently, `aleo` is the only supported `network` domain.
-
-```leo showLineNumbers
-program hello.aleo; // valid
-
-program Foo.aleo;   // invalid
-program baR.aleo;   // invalid
-program 0foo.aleo;  // invalid
-program 0_foo.aleo; // invalid
-program _foo.aleo;  // invalid
-```
+For the naming rules that apply to the program ID, see
+[Program name (program ID)](#program-name-program-id) above.
 
 ### Constant
 

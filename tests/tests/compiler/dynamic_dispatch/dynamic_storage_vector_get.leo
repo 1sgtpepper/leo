@@ -10,5 +10,5 @@ program test.aleo {
 }
 
 final fn finalize_query(target: field, i: u32) {
-    let val: u64? = Logs@(target)::entries.get(i);
+    let _val: u64? = Logs@(target)::entries.get(i);
 }

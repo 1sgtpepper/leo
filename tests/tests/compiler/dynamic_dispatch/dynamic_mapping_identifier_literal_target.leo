@@ -10,5 +10,5 @@ program test.aleo {
 }
 
 final fn finalize_query(key: address) {
-    let val: u64 = Bank@('test')::balances.get(key);
+    let _val: u64 = Bank@('test')::balances.get(key);
 }

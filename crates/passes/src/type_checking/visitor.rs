@@ -2170,11 +2170,25 @@ impl TypeCheckingVisitor<'_> {
             }
         }
 
-        // Ensure that `@no_inline` is not used on `final fn` functions.
-        if matches!(self.scope_state.variant, Some(Variant::FinalFn))
-            && function.annotations.iter().any(|a| a.identifier.name == sym::no_inline)
-        {
-            self.emit_err(crate::errors::type_checker::no_inline_not_allowed_on_final_fn(function.identifier.span()));
+        // Reject `@no_inline` on functions that the compiler force-inlines anyway. `final fn`
+        // is always inlined (its own dedicated diagnostic). A leading-`_` `Variant::Fn` is
+        // force-inlined by `function_inlining` because the name must never reach the VM as a
+        // closure identifier. The two checks are mutually exclusive — emit at most one error.
+        // (Reject-`_`-prefix on entry-point names is handled by the `NameValidation` pass,
+        // which runs earlier.)
+        let has_no_inline = function.annotations.iter().any(|a| a.identifier.name == sym::no_inline);
+        if has_no_inline {
+            if matches!(self.scope_state.variant, Some(Variant::FinalFn)) {
+                self.emit_err(crate::errors::type_checker::no_inline_not_allowed_on_final_fn(
+                    function.identifier.span(),
+                ));
+            } else if matches!(self.scope_state.variant, Some(Variant::Fn))
+                && crate::unused_items::name_starts_with_underscore(function.identifier.name)
+            {
+                self.emit_err(crate::errors::type_checker::no_inline_not_allowed_on_underscore_fn(
+                    function.identifier.span(),
+                ));
+            }
         }
 
         if matches!(self.scope_state.variant, Some(Variant::FinalFn)) {

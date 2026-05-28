@@ -1,3 +1,8 @@
+[WUNU03714004] Warning: unused import: `inner.aleo`
+   ╭─[ compiler-test:2:1 ]
+   │
+ 2 │ import inner.aleo;
+───╯
 program inner.aleo;
 
 mapping foo:
@@ -67,6 +72,11 @@ finalize outer_2:
 ---
 Note: Treating dependencies as Aleo produces different results:
 
+[WUNU03714004] Warning: unused import: `inner.aleo`
+   ╭─[ compiler-test:2:1 ]
+   │
+ 2 │ import inner.aleo;
+───╯
 program inner.aleo;
 
 mapping foo:

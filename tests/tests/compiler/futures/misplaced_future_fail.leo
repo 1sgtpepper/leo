@@ -13,11 +13,11 @@ program child.aleo {
     }
 }
 
-final fn finalize_foo(x: u32) {
+final fn finalize_foo(_x: u32) {
     assert_eq(1u32, 1u32);
 }
 
-final fn finalize_boo(x: u32) {
+final fn finalize_boo(_x: u32) {
     assert_eq(1u32, 1u32);
 }
 

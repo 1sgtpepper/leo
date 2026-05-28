@@ -29,9 +29,13 @@ impl UnitVisitor for NameValidationVisitor<'_> {
         let program_name = input.program_id.name;
         self.does_not_contain_aleo(program_name, "program");
         self.is_not_keyword(program_name, "program", &[]);
+        // Program names are emitted as `program <name>.aleo;` in the bytecode.
+        self.does_not_start_with_underscore(program_name, "program");
 
         input.composites.iter().for_each(|(_, function)| self.visit_composite(function));
         input.interfaces.iter().for_each(|(_, interface)| self.visit_interface(interface));
+        input.mappings.iter().for_each(|(_, m)| self.visit_mapping(m));
+        input.storage_variables.iter().for_each(|(_, s)| self.visit_storage_variable(s));
         input.functions.iter().for_each(|(_, function)| self.visit_function(function));
     }
 
@@ -53,24 +57,46 @@ impl UnitVisitor for NameValidationVisitor<'_> {
         if input.is_record {
             self.does_not_contain_aleo(composite_name, item_type);
         }
+        // Composite names are emitted as `struct <name>:` / `record <name>:` in the bytecode.
+        self.does_not_start_with_underscore(composite_name, item_type);
 
         for Member { identifier: member_name, .. } in &input.members {
+            let member_item_type = if input.is_record { "record member" } else { "struct member" };
             if input.is_record {
-                self.is_not_keyword(*member_name, "record member", &["owner"]);
-                self.does_not_contain_aleo(*member_name, "record member");
+                self.is_not_keyword(*member_name, member_item_type, &["owner"]);
+                self.does_not_contain_aleo(*member_name, member_item_type);
             } else {
-                self.is_not_keyword(*member_name, "struct member", &[]);
+                self.is_not_keyword(*member_name, member_item_type, &[]);
             }
+            // Member names are emitted as `<name> as <type>;` in the bytecode.
+            self.does_not_start_with_underscore(*member_name, member_item_type);
         }
     }
 
     fn visit_function(&mut self, function: &Function) {
         use Variant::*;
         match function.variant {
-            EntryPoint => self.is_not_keyword(function.identifier, "entry point fn", &[]),
+            EntryPoint => {
+                self.is_not_keyword(function.identifier, "entry point fn", &[]);
+                // Entry-point function names are emitted verbatim as `function <name>:` in
+                // the bytecode. `Variant::Fn` is force-inlined when `_`-prefixed (see
+                // `function_inlining`) so the name never reaches the VM, and `FinalFn` is
+                // always inlined — so the check only applies to `EntryPoint`.
+                self.does_not_start_with_underscore(function.identifier, "entry-point fn");
+            }
             Fn => self.is_not_keyword(function.identifier, "regular fn", &[]),
             FinalFn | Finalize => {}
         }
+    }
+
+    fn visit_mapping(&mut self, input: &Mapping) {
+        // Mapping names are emitted as `mapping <name>:` in the bytecode.
+        self.does_not_start_with_underscore(input.identifier, "mapping");
+    }
+
+    fn visit_storage_variable(&mut self, input: &StorageVariable) {
+        // Storage variable names are emitted in the bytecode.
+        self.does_not_start_with_underscore(input.identifier, "storage variable");
     }
 
     fn visit_function_stub(&mut self, input: &FunctionStub) {

@@ -105,17 +105,17 @@ fn parse_interface_stub(program_name: Symbol, source: &Path, source_dir: &Path) 
         .collect::<Vec<_>>();
     let node_builder = NodeBuilder::default();
 
-    let program =
-        match parse_program(Handler::default(), &node_builder, &source_file, &module_source_files, BENCH_NETWORK) {
-            Ok(ast) => ast,
-            Err(err) => {
-                return Err(format!(
-                    "failed to parse dependency {}.aleo interface source {}: {err}",
-                    program_name,
-                    source.display()
-                ));
-            }
-        };
+    let (handler, _emitter) = Handler::new_with_buf();
+    let program = match parse_program(handler, &node_builder, &source_file, &module_source_files, BENCH_NETWORK) {
+        Ok(ast) => ast,
+        Err(err) => {
+            return Err(format!(
+                "failed to parse dependency {}.aleo interface source {}: {err}",
+                program_name,
+                source.display()
+            ));
+        }
+    };
 
     // Extract the single program scope.
     let scope = match program.program_scopes.values().next() {
@@ -269,13 +269,20 @@ pub fn load_source_fixture(source_path: &Path) -> Result<FixtureData, String> {
 }
 
 /// Creates a fresh [`Compiler`] with all fixture dependencies pre-loaded.
+///
+/// Uses a buffered emitter (the same shape the LSP uses via `Handler::new_with_buf`) so
+/// the benchmark measures actual compile work, not the cost of rendering diagnostics
+/// through `ariadne` and writing them to stderr. `Handler::default()` would route every
+/// warning through a 100-microsecond-per-call terminal-formatting path — meaningless for
+/// the use cases (LSP responsiveness, hot recompile loops) the benchmark is meant to track.
 pub fn create_compiler(fixture: &FixtureData) -> Compiler {
     let expected_unit_name = if fixture.program_name.is_empty() { None } else { Some(fixture.program_name.clone()) };
 
+    let (handler, _emitter) = Handler::new_with_buf();
     Compiler::new(
         expected_unit_name,
         false,
-        Handler::default(),
+        handler,
         Rc::new(NodeBuilder::default()),
         PathBuf::default(),
         Some(CompilerOptions::default()),
@@ -288,10 +295,11 @@ pub fn create_compiler(fixture: &FixtureData) -> Compiler {
 pub fn create_parse_only_compiler(fixture: &FixtureData) -> Compiler {
     let expected_unit_name = if fixture.program_name.is_empty() { None } else { Some(fixture.program_name.clone()) };
 
+    let (handler, _emitter) = Handler::new_with_buf();
     Compiler::new(
         expected_unit_name,
         false,
-        Handler::default(),
+        handler,
         Rc::new(NodeBuilder::default()),
         PathBuf::default(),
         Some(CompilerOptions::default()),

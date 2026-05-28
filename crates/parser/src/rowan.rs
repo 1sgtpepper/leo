@@ -246,21 +246,27 @@ impl<'a> ConversionContext<'a> {
         }
     }
 
-    /// Validate an identifier in a definition position (struct field, variable,
-    /// function name, etc.). In addition to the general identifier checks, this
-    /// rejects identifiers that start with `_` or that are reserved keywords.
-    fn validate_definition_identifier(&self, ident: &leo_ast::Identifier) {
-        // Skip validation for error-recovery placeholders.
+    /// Validate an identifier that introduces a name which never reaches the VM as
+    /// an identifier — `let` bindings, tuple-pattern names, and `const` declarations
+    /// (which are inlined at every use site). A leading `_` is allowed to signal an
+    /// intentionally unused binding, matching `rustc`'s `_x` convention.
+    fn validate_local_binding_identifier(&self, ident: &leo_ast::Identifier) {
         if ident.name == Symbol::intern("_error") {
             return;
         }
         self.validate_identifier(ident);
-        let text = ident.name.to_string();
-        if text.starts_with('_') {
-            self.handler.emit_err(crate::errors::identifier_cannot_start_with_underscore(ident.span));
-        }
         if symbol_is_keyword(ident.name) {
-            self.emit_unexpected_str("an identifier", &text, ident.span);
+            self.emit_unexpected_str("an identifier", ident.name.to_string(), ident.span);
+        }
+        // Bare intrinsic call sites (e.g. `_self_caller()`) are dispatched in
+        // `call_expr_to_expression` purely by symbol-name match, before any scope is consulted.
+        // A local binding with the same name would therefore be silently shadowed by the
+        // intrinsic at every call site. Reject the binding here so the collision surfaces at
+        // declaration. `Intrinsic::from_symbol` enumerates the full set, including ones that
+        // take type parameters; passing an empty slice still returns `Some` (the parameter
+        // count is validated later by the type checker).
+        if leo_ast::Intrinsic::from_symbol(ident.name, &[]).is_some() {
+            self.handler.emit_err(crate::errors::binding_name_collides_with_intrinsic(ident.name, ident.span));
         }
     }
 
@@ -1512,12 +1518,6 @@ impl<'a> ConversionContext<'a> {
             if name_text.starts_with("sign1") && name_text.parse::<Signature<TestnetV0>>().is_ok() {
                 return Ok(leo_ast::Literal::signature(name_text, span, id).into());
             }
-            // Reject standalone `_ident` in expression context -- these are only
-            // valid as the start of intrinsic calls (e.g. `_self_caller()`).
-            if name_text.starts_with('_') {
-                self.handler.emit_err(crate::errors::identifier_cannot_start_with_underscore(span));
-                return Ok(self.error_expression(span));
-            }
         }
 
         Ok(leo_ast::Expression::Path(path))
@@ -1726,7 +1726,7 @@ impl<'a> ConversionContext<'a> {
         match node.kind() {
             IDENT_PATTERN => {
                 let ident = self.require_ident(node, "identifier in pattern");
-                self.validate_definition_identifier(&ident);
+                self.validate_local_binding_identifier(&ident);
                 Ok(leo_ast::DefinitionPlace::Single(ident))
             }
             TUPLE_PATTERN => {
@@ -1739,7 +1739,7 @@ impl<'a> ConversionContext<'a> {
                             leo_ast::Identifier { name: Symbol::intern("_"), span, id: self.builder.next_id() }
                         } else {
                             let ident = self.require_ident(&n, "identifier in pattern");
-                            self.validate_definition_identifier(&ident);
+                            self.validate_local_binding_identifier(&ident);
                             ident
                         }
                     })
@@ -2580,7 +2580,7 @@ impl<'a> ConversionContext<'a> {
         let id = self.builder.next_id();
 
         let place = self.require_ident(node, "const name");
-        self.validate_definition_identifier(&place);
+        self.validate_local_binding_identifier(&place);
 
         let type_ = self.require_type(node, "const type")?;
 
