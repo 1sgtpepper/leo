@@ -1,0 +1,8 @@
+program deserialize_used_probe.aleo;
+
+function main:
+    cast true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true true into r0 as [boolean; 253u32];
+    deserialize.bits.raw r0 ([boolean; 253u32]) into r1 (field);
+    output r1 as field.private;
+status: failed: Any { .. }
+output: ()

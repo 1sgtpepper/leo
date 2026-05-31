@@ -1,0 +1,6 @@
+program deserialize_unused_probe.aleo;
+
+function main:
+    output 1u8 as u8.private;
+status: success
+output: 1u8
