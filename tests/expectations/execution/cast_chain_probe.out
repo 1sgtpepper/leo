@@ -1,0 +1,20 @@
+program test.aleo;
+
+function roundtrip_u8_i8_u8:
+    input r0 as u8.private;
+    cast r0 into r1 as u8;
+    output r1 as u8.private;
+
+function roundtrip_i8_u8_i8:
+    input r0 as i8.private;
+    cast r0 into r1 as i8;
+    output r1 as i8.private;
+
+constructor:
+    assert.eq edition 0u16;
+status: success
+output: 127u8
+status: success
+output: 255u8
+status: success
+output: -1i8
