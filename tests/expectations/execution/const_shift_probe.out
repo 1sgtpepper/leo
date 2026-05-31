@@ -1,0 +1,16 @@
+program test.aleo;
+
+function const_overflow_u8:
+    output 0u8 as u8.private;
+
+function runtime_overflow_u8:
+    input r0 as u8.private;
+    shl r0 1u8 into r1;
+    output r1 as u8.private;
+
+constructor:
+    assert.eq edition 0u16;
+status: success
+output: 0u8
+status: failed: Any { .. }
+output: ()
