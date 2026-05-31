@@ -1,0 +1,16 @@
+program const_ternary_probe.aleo;
+
+function literal_true_drops_div:
+    input r0 as u8.private;
+    output 1u8 as u8.private;
+
+function runtime_true_keeps_div:
+    input r0 as boolean.private;
+    input r1 as u8.private;
+    div r1 0u8 into r2;
+    ternary r0 1u8 r2 into r3;
+    output r3 as u8.private;
+status: success
+output: 1u8
+status: failed: Any { .. }
+output: ()
