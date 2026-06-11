@@ -744,22 +744,23 @@ fn fold_consecutive_casts(stmts: &mut Vec<AleoStmt>) {
         }
     };
 
-    let target_domain_contains = |container: &AleoType, containee: &AleoType| -> bool {
-        use PrimitiveCastDomain::*;
-        match (primitive_cast_domain(container), primitive_cast_domain(containee)) {
-            (Some(Signed { bits: container_bits }), Some(Signed { bits: containee_bits })) => {
-                container_bits >= containee_bits
+    let intermediate_accepts_all_final_values =
+        |intermediate: &AleoType, final_target: &AleoType| -> bool {
+            use PrimitiveCastDomain::*;
+            match (primitive_cast_domain(intermediate), primitive_cast_domain(final_target)) {
+                (Some(Signed { bits: intermediate_bits }), Some(Signed { bits: final_bits })) => {
+                    intermediate_bits >= final_bits
+                }
+                (Some(Signed { bits: intermediate_bits }), Some(Unsigned { bits: final_bits })) => {
+                    intermediate_bits > final_bits
+                }
+                (Some(Unsigned { bits: intermediate_bits }), Some(Unsigned { bits: final_bits })) => {
+                    intermediate_bits >= final_bits
+                }
+                (Some(Unsigned { .. }), Some(Signed { .. })) => false,
+                _ => false,
             }
-            (Some(Signed { bits: container_bits }), Some(Unsigned { bits: containee_bits })) => {
-                container_bits > containee_bits
-            }
-            (Some(Unsigned { bits: container_bits }), Some(Unsigned { bits: containee_bits })) => {
-                container_bits >= containee_bits
-            }
-            (Some(Unsigned { .. }), Some(Signed { .. })) => false,
-            _ => false,
-        }
-    };
+        };
 
     let mut i = 0;
     while i + 1 < stmts.len() {
@@ -777,7 +778,7 @@ fn fold_consecutive_casts(stmts: &mut Vec<AleoStmt>) {
                     // accepted by the final target is also accepted by the
                     // intermediate target. Equal bit widths are not enough
                     // across signed and unsigned primitive domains.
-                    && target_domain_contains(t1, t2)
+                    && intermediate_accepts_all_final_values(t1, t2)
             } else {
                 false
             }

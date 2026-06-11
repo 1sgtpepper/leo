@@ -1,17 +1,3 @@
-/*
-seed = 123456789
-
-[case]
-program = "test.aleo"
-function = "store_after_sub_check"
-input = ["0u8"]
-
-[case]
-program = "test.aleo"
-function = "store_after_sub_check"
-input = ["1u8"]
-*/
-
 program test.aleo {
     mapping observed: u8 => u8;
 
