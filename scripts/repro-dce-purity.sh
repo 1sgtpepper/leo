@@ -39,11 +39,19 @@ LEO
 build_project dce_wrapped_div_zero
 echo "Wrapped division generated instructions:"
 grep -n 'div.w\|output' "$WORK/dce_wrapped_div_zero/build/dce_wrapped_div_zero/dce_wrapped_div_zero.aleo"
-if grep -q 'div.w' "$WORK/dce_wrapped_div_zero/build/dce_wrapped_div_zero/dce_wrapped_div_zero.aleo"; then
-  echo "Unexpected div.w was preserved" >&2
+if ! grep -q 'div.w' "$WORK/dce_wrapped_div_zero/build/dce_wrapped_div_zero/dce_wrapped_div_zero.aleo"; then
+  echo "Expected div.w to be preserved" >&2
   exit 1
 fi
-run_project dce_wrapped_div_zero main 7u8
+set +e
+div_output="$(run_project dce_wrapped_div_zero main 7u8 2>&1)"
+div_status=$?
+set -e
+printf '%s\n' "$div_output"
+if [[ "$div_status" -eq 0 ]]; then
+  echo "Expected preserved div.w by zero to fail at runtime" >&2
+  exit 1
+fi
 
 run_leo_new dce_wrapped_rem_zero
 cat > "$WORK/dce_wrapped_rem_zero/src/main.leo" <<'LEO'
@@ -60,11 +68,19 @@ LEO
 build_project dce_wrapped_rem_zero
 echo "Wrapped remainder generated instructions:"
 grep -n 'rem.w\|output' "$WORK/dce_wrapped_rem_zero/build/dce_wrapped_rem_zero/dce_wrapped_rem_zero.aleo"
-if grep -q 'rem.w' "$WORK/dce_wrapped_rem_zero/build/dce_wrapped_rem_zero/dce_wrapped_rem_zero.aleo"; then
-  echo "Unexpected rem.w was preserved" >&2
+if ! grep -q 'rem.w' "$WORK/dce_wrapped_rem_zero/build/dce_wrapped_rem_zero/dce_wrapped_rem_zero.aleo"; then
+  echo "Expected rem.w to be preserved" >&2
   exit 1
 fi
-run_project dce_wrapped_rem_zero main 7u8
+set +e
+rem_output="$(run_project dce_wrapped_rem_zero main 7u8 2>&1)"
+rem_status=$?
+set -e
+printf '%s\n' "$rem_output"
+if [[ "$rem_status" -eq 0 ]]; then
+  echo "Expected preserved rem.w by zero to fail at runtime" >&2
+  exit 1
+fi
 
 run_leo_new dyn_record_dce_probe
 cat > "$WORK/dyn_record_dce_probe/src/main.leo" <<'LEO'
@@ -87,9 +103,9 @@ LEO
 build_project dyn_record_dce_probe
 echo "Dynamic record generated instructions:"
 grep -n 'dynamic.record\|get.record.dynamic\|output' "$WORK/dyn_record_dce_probe/build/dyn_record_dce_probe/dyn_record_dce_probe.aleo"
-if grep -q 'get.record.dynamic' "$WORK/dyn_record_dce_probe/build/dyn_record_dce_probe/dyn_record_dce_probe.aleo"; then
-  echo "Unexpected get.record.dynamic was preserved" >&2
+if ! grep -q 'get.record.dynamic' "$WORK/dyn_record_dce_probe/build/dyn_record_dce_probe/dyn_record_dce_probe.aleo"; then
+  echo "Expected get.record.dynamic to be preserved" >&2
   exit 1
 fi
 
-echo "DCE_PURITY_REPRO_CONFIRMED"
+echo "DCE_PURITY_FIX_CONFIRMED"
