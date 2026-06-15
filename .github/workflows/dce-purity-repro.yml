@@ -18,5 +18,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Run DCE regression
+        run: TEST_FILTER=fallible_unused cargo test -p leo-passes dead_code_elimination_runner_test --locked
       - name: Reproduce DCE purity gaps
         run: bash scripts/repro-dce-purity.sh
