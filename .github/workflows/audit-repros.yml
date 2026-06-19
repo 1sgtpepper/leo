@@ -6,12 +6,16 @@ on:
       - ci/leo-audit-20260619
   workflow_dispatch:
 
+concurrency:
+  group: audit-repros-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  repros:
-    name: Leo audit repro probes
+  build:
+    name: Build Leo binary
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -23,24 +27,117 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build leo
         run: cargo build -p leo-lang --locked --features noconfig
-      - name: Run audit repro probes
-        run: scripts/audit-repros.sh | tee audit-repro-results.txt
+      - name: Stage binary
+        run: |
+          mkdir -p .ci-bin
+          cp target/debug/leo .ci-bin/leo
+      - name: Upload leo binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: leo-binary
+          path: .ci-bin/leo
+          if-no-files-found: error
+
+  inclusive-loop-eq:
+    name: "Repro: inclusive equal-bound loop"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: leo-binary
+          path: .ci-bin
+      - name: Run inclusive loop repro
+        run: |
+          chmod +x .ci-bin/leo
+          LEO_BIN="$PWD/.ci-bin/leo" scripts/audit-repros/inclusive_loop_eq.sh | tee inclusive_loop_eq.txt
       - name: Add summary
         if: always()
-        run: |
-          {
-            echo "## Audit repro results"
-            echo
-            if [ -f audit-repro-results.txt ]; then
-              sed -n '/^RESULT /p' audit-repro-results.txt
-            else
-              echo "No result file was produced."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload results
+        run: scripts/audit-repros/summary.sh inclusive_loop_eq.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: audit-repro-results
-          path: audit-repro-results.txt
+          name: inclusive-loop-eq-result
+          path: inclusive_loop_eq.txt
+          if-no-files-found: warn
+
+  const-ternary-fallible:
+    name: "Repro: constant ternary fallible arm"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: leo-binary
+          path: .ci-bin
+      - name: Run constant ternary repro
+        run: |
+          chmod +x .ci-bin/leo
+          LEO_BIN="$PWD/.ci-bin/leo" scripts/audit-repros/const_ternary_fallible.sh | tee const_ternary_fallible.txt
+      - name: Add summary
+        if: always()
+        run: scripts/audit-repros/summary.sh const_ternary_fallible.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: const-ternary-fallible-result
+          path: const_ternary_fallible.txt
+          if-no-files-found: warn
+
+  dce-dynamic-array-index:
+    name: "Repro: dynamic array index liveness"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: leo-binary
+          path: .ci-bin
+      - name: Run dynamic array index repro
+        run: |
+          chmod +x .ci-bin/leo
+          LEO_BIN="$PWD/.ci-bin/leo" scripts/audit-repros/dce_dynamic_array_index.sh | tee dce_dynamic_array_index.txt
+      - name: Add summary
+        if: always()
+        run: scripts/audit-repros/summary.sh dce_dynamic_array_index.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dce-dynamic-array-index-result
+          path: dce_dynamic_array_index.txt
+          if-no-files-found: warn
+
+  option-else-if-unwrap:
+    name: "Repro: option else-if unwrap placement"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: leo-binary
+          path: .ci-bin
+      - name: Run option else-if unwrap repro
+        run: |
+          chmod +x .ci-bin/leo
+          LEO_BIN="$PWD/.ci-bin/leo" scripts/audit-repros/option_else_if_unwrap.sh | tee option_else_if_unwrap.txt
+      - name: Add summary
+        if: always()
+        run: scripts/audit-repros/summary.sh option_else_if_unwrap.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: option-else-if-unwrap-result
+          path: option_else_if_unwrap.txt
           if-no-files-found: warn
