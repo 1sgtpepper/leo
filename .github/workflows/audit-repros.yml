@@ -1,0 +1,46 @@
+name: Audit Repros
+
+on:
+  push:
+    branches:
+      - ci/leo-audit-20260619
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repros:
+    name: Leo audit repro probes
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build leo
+        run: cargo build -p leo-lang --locked --features noconfig
+      - name: Run audit repro probes
+        run: scripts/audit-repros.sh | tee audit-repro-results.txt
+      - name: Add summary
+        if: always()
+        run: |
+          {
+            echo "## Audit repro results"
+            echo
+            if [ -f audit-repro-results.txt ]; then
+              sed -n '/^RESULT /p' audit-repro-results.txt
+            else
+              echo "No result file was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-repro-results
+          path: audit-repro-results.txt
+          if-no-files-found: warn
