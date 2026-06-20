@@ -1,0 +1,45 @@
+name: Leo 29343 PR2
+
+on:
+  push:
+    branches:
+      - ci/leo-29343-pr2-v1
+
+permissions:
+  contents: read
+
+jobs:
+  generate-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libclang-dev
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - name: Generate storage read forwarding expectations
+        env:
+          UPDATE_EXPECT: 1
+          TEST_FILTER: storage_read_forwarding
+        run: cargo test -p leo-passes test_passes --locked -- --nocapture
+
+      - name: Print generated expectation diff
+        run: |
+          git diff -- tests/expectations/passes/storage_read_forwarding
+          test -z "$(git diff -- crates compiler tests/tests/passes/storage_read_forwarding)"
+
+      - name: Check storage read forwarding pass fixtures
+        env:
+          TEST_FILTER: storage_read_forwarding
+        run: cargo test -p leo-passes test_passes --locked -- --nocapture
