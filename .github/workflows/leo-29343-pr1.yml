@@ -1,0 +1,66 @@
+name: Leo 29343 PR1
+
+on:
+  push:
+    branches:
+      - ci/leo-29343-pr1-v9
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libclang-dev
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - name: Check SSA const propagation pass fixtures
+        env:
+          TEST_FILTER: ssa_const_propagation
+        run: cargo test -p leo-passes test_passes --locked -- --nocapture
+
+      - name: Check storage compiler fixture
+        env:
+          TEST_FILTER: storage/vector_get_unwrap_or
+        run: cargo test -p leo-compiler test_compiler --locked -- --nocapture
+
+      - name: Verify finalizer shape
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          out = Path("tests/expectations/compiler/storage/vector_get_unwrap_or.out").read_text()
+          start = out.index("finalize read_one:")
+          end = out.index("\nconstructor:", start)
+          finalizer = out[start:end]
+
+          expected = """finalize read_one:
+              input r0 as u32.public;
+              get.or_use data__len__[false] 0u32 into r1;
+              lt r0 r1 into r2;
+              get.or_use data__[r0] 0u8 into r3;
+              ternary r2 r3 0u8 into r4;
+              set r4 into result[false];"""
+
+          if finalizer.strip() != expected.strip():
+              print(finalizer)
+              raise SystemExit("unexpected finalize output")
+
+          if "Optional__" in finalizer or ".val" in finalizer or ".is_some" in finalizer:
+              print(finalizer)
+              raise SystemExit("trailing Optional materialization survived")
+          PY
