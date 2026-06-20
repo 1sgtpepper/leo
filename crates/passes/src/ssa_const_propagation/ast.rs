@@ -18,7 +18,7 @@ use crate::expression_can_be_discarded;
 
 use super::{
     SsaConstPropagationVisitor,
-    visitor::{is_atom, is_one_literal, is_zero_literal, same_ssa_atom},
+    visitor::{is_atom, is_one_literal, is_zero_literal, same_atom_value, same_ssa_atom},
 };
 
 use leo_ast::{
@@ -49,6 +49,9 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
             let (new_expr, _) = self.value_to_expression(&constant_value, span, id).expect(VALUE_ERROR);
             self.changed = true;
             (new_expr, Some(constant_value))
+        } else if let Some(alias) = self.aliases.get(&identifier_name).cloned() {
+            self.changed = true;
+            (alias, None)
         } else {
             // No constant value for this variable, keep the path as is.
             (input.into(), None)
@@ -71,12 +74,12 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
         if let Expression::Path(path) = &input.inner
             && let Some(name) = path.try_local_symbol()
             && let Some(fields) = self.atom_fielded_composites.get(&name)
-            && let Some(atom) = fields.get(&input.name.name)
+            && let Some(atom) = fields.get(&input.name.name).cloned()
         {
             self.changed = true;
             // Recompute the atom's Value so downstream folding sees the forwarded
             // constant (literals evaluate directly; paths look up tracked constants).
-            let opt_value = match atom {
+            let opt_value = match &atom {
                 Expression::Literal(lit) => {
                     let ty = self.state.type_table.get(&lit.id());
                     const_eval::literal_to_value(lit, &ty).ok()
@@ -87,7 +90,7 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
                 // which restricts to `Path`/`Literal`.
                 _ => unreachable!("atom_fielded_composites fields must be Path or Literal"),
             };
-            return (atom.clone(), opt_value);
+            return (atom, opt_value);
         }
 
         (input.into(), None)
@@ -434,6 +437,26 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
                     return (if_true, if_true_value);
                 }
 
+                if let Expression::Path(path) = &if_true
+                    && let Some((inner_cond, _, inner_false)) =
+                        path.try_local_symbol().and_then(|name| self.ternaries.get(&name))
+                    && same_atom_value(&cond, inner_cond)
+                    && same_atom_value(&if_false, inner_false)
+                {
+                    self.changed = true;
+                    return (if_true, if_true_value);
+                }
+
+                if let Expression::Path(path) = &if_false
+                    && let Some((inner_cond, inner_true, _)) =
+                        path.try_local_symbol().and_then(|name| self.ternaries.get(&name))
+                    && same_atom_value(&cond, inner_cond)
+                    && same_atom_value(&if_true, inner_true)
+                {
+                    self.changed = true;
+                    return (if_false, if_false_value);
+                }
+
                 (TernaryExpression { condition: cond, if_true, if_false, ..input }.into(), None)
             }
         }
@@ -532,11 +555,9 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
     }
 
     /* Statements */
-    /// Reconstruct a definition statement. If the RHS evaluates to a constant, track it
-    /// in the constants map for propagation. Additionally, when the RHS is a composite
-    /// literal whose fields are all atoms (paths or literals), record the field-to-atom
-    /// mapping so that subsequent `x.field` accesses can be forwarded without
-    /// rematerializing the struct.
+    /// Reconstruct a definition statement and update the local SSA facts used
+    /// for later rewrites: constants, atom-fielded composites, atom-only
+    /// ternaries, and simple local aliases.
     fn reconstruct_definition(&mut self, mut input: DefinitionStatement) -> (Statement, Self::AdditionalOutput) {
         // Reconstruct the RHS expression first.
         let (new_value, opt_value) = self.reconstruct_expression(input.value, &());
@@ -571,6 +592,23 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
             if all_atoms {
                 self.atom_fielded_composites.insert(identifier.name, fields);
             }
+        }
+
+        if let (DefinitionPlace::Single(identifier), Expression::Ternary(ternary)) = (&input.place, &new_value)
+            && is_atom(&ternary.condition)
+            && is_atom(&ternary.if_true)
+            && is_atom(&ternary.if_false)
+        {
+            self.ternaries.insert(
+                identifier.name,
+                (ternary.condition.clone(), ternary.if_true.clone(), ternary.if_false.clone()),
+            );
+        }
+
+        if let (DefinitionPlace::Single(identifier), Expression::Path(path)) = (&input.place, &new_value)
+            && path.try_local_symbol().is_some()
+        {
+            self.aliases.insert(identifier.name, new_value.clone());
         }
 
         input.value = new_value;

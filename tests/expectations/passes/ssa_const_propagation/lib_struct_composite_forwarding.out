@@ -13,7 +13,7 @@ program test.aleo {
         let s$#2 = shape_lib::Pair { a: p$$0, b: q$$1 };
         let $var$3 = p$$0;
         let $var$4 = q$$1;
-        let $var$5 = $var$3 + $var$4;
+        let $var$5 = p$$0 + q$$1;
         return $var$5;
     }
 }

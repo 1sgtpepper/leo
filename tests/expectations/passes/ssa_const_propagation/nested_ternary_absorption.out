@@ -1,0 +1,21 @@
+program test.aleo {
+    @noupgrade
+    async constructor() {
+    }
+    fn absorb_true_arm(cond$$0: bool, value$$1: u8, fallback$$2: u8) -> u8 {
+        let inner$#3 = cond$$0 ? value$$1 : fallback$$2;
+        let $var$4 = inner$#3;
+        return inner$#3;
+    }
+    fn absorb_false_arm(cond$$5: bool, value$$6: u8, fallback$$7: u8) -> u8 {
+        let inner$#8 = cond$$5 ? value$$6 : fallback$$7;
+        let $var$9 = inner$#8;
+        return inner$#8;
+    }
+    fn keep_different_fallback(cond$$10: bool, value$$11: u8, first$$12: u8, second$$13: u8) -> u8 {
+        let inner$#14 = cond$$10 ? value$$11 : first$$12;
+        let $var$15 = cond$$10 ? inner$#14 : second$$13;
+        return $var$15;
+    }
+}
+

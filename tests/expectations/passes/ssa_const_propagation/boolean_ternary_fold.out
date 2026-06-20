@@ -6,7 +6,7 @@ program test.aleo {
         let $var$1 = true;
         let $var$2 = false;
         let $var$3 = cond$$0;
-        return $var$3;
+        return cond$$0;
     }
     fn fold_to_not_cond(cond$$4: bool) -> bool {
         let $var$5 = false;
