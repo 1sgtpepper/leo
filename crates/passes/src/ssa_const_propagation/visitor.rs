@@ -35,6 +35,11 @@ pub struct SsaConstPropagationVisitor<'a> {
     /// Used to forward `x.field` to the stored atom without rematerializing
     /// the enclosing struct — effectively scalarizing short-lived aggregates.
     pub atom_fielded_composites: IndexMap<Symbol, IndexMap<Symbol, Expression>>,
+    /// Maps variable names bound to atom-only ternary expressions to their
+    /// condition, true branch, and false branch.
+    pub ternaries: IndexMap<Symbol, (Expression, Expression, Expression)>,
+    /// Maps local variables that are simple aliases of other local variables.
+    pub aliases: IndexMap<Symbol, Expression>,
     /// Have we actually modified the program at all?
     pub changed: bool,
 }
@@ -90,7 +95,23 @@ pub fn same_ssa_atom(a: &Expression, b: &Expression) -> bool {
     }
 }
 
+/// Check if two atom expressions are known to have the same value.
+pub fn same_atom_value(a: &Expression, b: &Expression) -> bool {
+    match (a, b) {
+        (Expression::Literal(a), Expression::Literal(b)) => a.variant == b.variant,
+        _ => same_ssa_atom(a, b),
+    }
+}
+
 impl SsaConstPropagationVisitor<'_> {
+    /// Clear analysis state that is only valid within one SSA function body.
+    pub(super) fn clear_tracked_values(&mut self) {
+        self.constants.clear();
+        self.atom_fielded_composites.clear();
+        self.ternaries.clear();
+        self.aliases.clear();
+    }
+
     /// Emit a `StaticAnalyzerError`.
     pub fn emit_err(&self, err: Formatted) {
         self.state.handler.emit_err(err);
