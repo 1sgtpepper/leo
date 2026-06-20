@@ -454,6 +454,8 @@ impl Compiler {
 
         self.do_pass::<SsaForming>(SsaFormingInput { rename_defs: false })?;
 
+        self.do_pass::<SsaConstPropagation>(())?;
+
         self.do_pass::<CommonSubexpressionEliminating>(())?;
 
         self.do_pass::<DeadCodeEliminating>(())?;
