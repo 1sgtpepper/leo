@@ -1,0 +1,39 @@
+name: Leo 29343 PR2 Expectation Generation
+
+on:
+  push:
+    branches:
+      - ci/leo-29343-pr2-generate-external-v2
+
+permissions:
+  contents: read
+
+jobs:
+  generate-expectation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libclang-dev
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
+
+      - name: Generate external mapping expectation
+        env:
+          TEST_FILTER: storage/external_same_named_mapping_reads
+          UPDATE_EXPECT: 1
+        run: cargo test -p leo-compiler test_compiler --locked -- --nocapture
+
+      - name: Print generated expectation
+        run: |
+          sed -n '1,260p' tests/expectations/compiler/storage/external_same_named_mapping_reads.out
