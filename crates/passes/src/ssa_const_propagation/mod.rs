@@ -51,6 +51,7 @@ impl Pass for SsaConstPropagation {
                 constants: Default::default(),
                 atom_fielded_composites: Default::default(),
                 ternaries: Default::default(),
+                aliases: Default::default(),
                 changed: false,
             };
 

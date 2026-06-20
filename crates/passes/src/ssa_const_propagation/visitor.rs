@@ -38,6 +38,8 @@ pub struct SsaConstPropagationVisitor<'a> {
     /// Maps variable names bound to atom-only ternary expressions to their
     /// condition, true branch, and false branch.
     pub ternaries: IndexMap<Symbol, (Expression, Expression, Expression)>,
+    /// Maps local variables that are simple aliases of other local variables.
+    pub aliases: IndexMap<Symbol, Expression>,
     /// Have we actually modified the program at all?
     pub changed: bool,
 }

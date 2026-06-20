@@ -49,6 +49,9 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
             let (new_expr, _) = self.value_to_expression(&constant_value, span, id).expect(VALUE_ERROR);
             self.changed = true;
             (new_expr, Some(constant_value))
+        } else if let Some(alias) = self.aliases.get(&identifier_name).cloned() {
+            self.changed = true;
+            (alias, None)
         } else {
             // No constant value for this variable, keep the path as is.
             (input.into(), None)
@@ -602,6 +605,12 @@ impl AstReconstructor for SsaConstPropagationVisitor<'_> {
                 identifier.name,
                 (ternary.condition.clone(), ternary.if_true.clone(), ternary.if_false.clone()),
             );
+        }
+
+        if let (DefinitionPlace::Single(identifier), Expression::Path(path)) = (&input.place, &new_value)
+            && path.try_local_symbol().is_some()
+        {
+            self.aliases.insert(identifier.name, new_value.clone());
         }
 
         input.value = new_value;
