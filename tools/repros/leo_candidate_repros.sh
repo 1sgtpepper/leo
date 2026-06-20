@@ -223,7 +223,7 @@ import vector_get_stmt_drop.aleo;
 program test_vector_get_stmt_drop.aleo {
     @test
     @should_fail
-    fn dropped_get_key_division_by_zero_must_fail() -> Final {
+    fn divzero_get() -> Final {
         let f: Final = vector_get_stmt_drop.aleo::dropped_get_key(0u32);
         return final {
             f.run();
@@ -306,7 +306,11 @@ EOF
 
     local build_log="$LOG_DIR/$name.build.log"
     if ! run_capture "$build_log" bash -lc "cd '$project' && '$LEO' build"; then
-        record "$name" "INCONCLUSIVE" "project did not build; see $build_log"
+        if grep -q 'cannot reassign `y` from a conditional scope to an outer scope in a final block' "$build_log"; then
+            record "$name" "NOT_CONFIRMED" "current Leo rejects the source form before codegen, so no wrong artifact is produced; see $build_log"
+        else
+            record "$name" "INCONCLUSIVE" "project did not build; see $build_log"
+        fi
         return
     fi
 
