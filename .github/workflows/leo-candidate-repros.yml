@@ -1,0 +1,40 @@
+name: Leo candidate repros
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/leo-candidate-repros
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build Leo CLI
+        run: cargo build --package leo-lang --bin leo --release --locked --features noconfig
+
+      - name: Run candidate repros
+        run: bash tools/repros/leo_candidate_repros.sh
+
+      - name: Publish repro summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/leo-candidate-repros/repro-results.md" ]; then
+            cat "$RUNNER_TEMP/leo-candidate-repros/repro-results.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload repro logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leo-candidate-repro-logs
+          path: ${{ runner.temp }}/leo-candidate-repros
