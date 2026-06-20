@@ -166,6 +166,13 @@ impl CodeGeneratingVisitor<'_> {
     }
 
     fn visit_definition(&mut self, input: &DefinitionStatement) -> Vec<AleoStmt> {
+        if std::env::var_os("LEO_29343_DEBUG").is_some() {
+            let debug_input = format!("{input:?}");
+            if debug_input.contains("Optional__") || debug_input.contains("is_some") || debug_input.contains("val") {
+                eprintln!("LEO_29343_DEBUG definition: {input:?}");
+            }
+        }
+
         match (&input.place, &input.value) {
             (DefinitionPlace::Single(identifier), _) => {
                 let (operand, expression_instructions) = self.visit_expression(&input.value);

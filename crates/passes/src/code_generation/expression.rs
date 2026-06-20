@@ -431,6 +431,13 @@ impl CodeGeneratingVisitor<'_> {
     }
 
     fn visit_member_access(&mut self, input: &MemberAccess) -> (AleoExpr, Vec<AleoStmt>) {
+        if std::env::var_os("LEO_29343_DEBUG").is_some() {
+            let debug_input = format!("{input:?}");
+            if debug_input.contains("Optional__") || debug_input.contains("is_some") || debug_input.contains("val") {
+                eprintln!("LEO_29343_DEBUG member_access: {input:?}");
+            }
+        }
+
         let (inner_expr, mut instructions) = self.visit_expression(&input.inner);
         let inner_expr = inner_expr.expect("Trying to access a member of an empty expression.");
 

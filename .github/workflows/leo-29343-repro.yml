@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TEST_FILTER: storage/vector_get_unwrap_or
+      LEO_29343_DEBUG: "1"
     steps:
       - uses: actions/checkout@v4
 
