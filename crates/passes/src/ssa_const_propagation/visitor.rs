@@ -35,8 +35,18 @@ pub struct SsaConstPropagationVisitor<'a> {
     /// Used to forward `x.field` to the stored atom without rematerializing
     /// the enclosing struct — effectively scalarizing short-lived aggregates.
     pub atom_fielded_composites: IndexMap<Symbol, IndexMap<Symbol, Expression>>,
+    /// Maps local variables bound to atom-only ternaries so later redundant
+    /// ternaries over the same condition can be absorbed.
+    pub ternaries: IndexMap<Symbol, TrackedTernary>,
     /// Have we actually modified the program at all?
     pub changed: bool,
+}
+
+#[derive(Clone)]
+pub struct TrackedTernary {
+    pub condition: Expression,
+    pub if_true: Expression,
+    pub if_false: Expression,
 }
 
 /// An "atom" is an expression simple enough to substitute for another use-site
@@ -86,6 +96,7 @@ pub fn same_ssa_atom(a: &Expression, b: &Expression) -> bool {
             let sb = pb.try_local_symbol();
             sa == sb && sa.is_some()
         }
+        (Expression::Literal(a), Expression::Literal(b)) => a.variant == b.variant,
         _ => false,
     }
 }

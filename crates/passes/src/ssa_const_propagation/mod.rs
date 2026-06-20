@@ -18,7 +18,8 @@
 //! This pass runs after SSA formation, so each variable has a unique name.
 //!
 //! The pass tracks variables that are assigned literal values and replaces
-//! uses of those variables with their constant values.
+//! uses of those variables with their constant values. It also tracks simple
+//! atom-only aggregate fields and ternaries that can be forwarded safely.
 
 use crate::Pass;
 
@@ -50,6 +51,7 @@ impl Pass for SsaConstPropagation {
                 program: Symbol::intern(""),
                 constants: Default::default(),
                 atom_fielded_composites: Default::default(),
+                ternaries: Default::default(),
                 changed: false,
             };
 
