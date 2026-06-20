@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set +e
 set -u -o pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -54,7 +55,7 @@ run_capture() {
     set +e
     "$@" >"$log" 2>&1
     local status=$?
-    set -e
+    set +e
     return "$status"
 }
 
@@ -120,7 +121,7 @@ import push_len_semantics.aleo;
 
 program test_push_len_semantics.aleo {
     @test
-    fn stores_pre_push_length_on_empty_vector() -> Final {
+    fn empty_pre_len() -> Final {
         let f: Final = push_len_semantics.aleo::push_len();
         return final {
             f.run();
@@ -130,7 +131,7 @@ program test_push_len_semantics.aleo {
     }
 
     @test
-    fn stores_pre_push_length_on_nonempty_vector() -> Final {
+    fn nonempty_pre_len() -> Final {
         let f1: Final = push_len_semantics.aleo::push_literal(7u32);
         let f2: Final = push_len_semantics.aleo::push_len();
         return final {
@@ -155,17 +156,24 @@ EOF
 }
 
 case_ssa_array_index() {
-    local name="ssa_array_index_const_miss"
-    local project
-    project="$(make_project "$name" 'program ssa_array_index_const_miss.aleo {
-    fn read_reassigned_local() -> u8 {
+    local read_name="ssa_array_index_read"
+    local read_project
+    read_project="$(make_project "$read_name" 'program ssa_array_index_read.aleo {
+    fn main() -> u8 {
         let arr: [u8; 2] = [11u8, 22u8];
         let i: u32 = 0u32;
         i = 1u32;
         return arr[i];
     }
 
-    fn write_reassigned_local() -> u8 {
+    @noupgrade
+    constructor() {}
+}')"
+
+    local write_name="ssa_array_index_write"
+    local write_project
+    write_project="$(make_project "$write_name" 'program ssa_array_index_write.aleo {
+    fn main() -> u8 {
         let arr: [u8; 2] = [11u8, 22u8];
         let i: u32 = 0u32;
         i = 1u32;
@@ -177,18 +185,18 @@ case_ssa_array_index() {
     constructor() {}
 }')"
 
-    local read_log="$LOG_DIR/$name.read.log"
-    run_capture "$read_log" bash -lc "cd '$project' && '$LEO' run read_reassigned_local"
+    local read_log="$LOG_DIR/$read_name.run.log"
+    run_capture "$read_log" bash -lc "cd '$read_project' && '$LEO' run main"
     local read_status=$?
 
-    local write_log="$LOG_DIR/$name.write.log"
-    run_capture "$write_log" bash -lc "cd '$project' && '$LEO' run write_reassigned_local"
+    local write_log="$LOG_DIR/$write_name.run.log"
+    run_capture "$write_log" bash -lc "cd '$write_project' && '$LEO' run main"
     local write_status=$?
 
     if [ "$read_status" -eq 0 ] && grep -q '22u8' "$read_log" && [ "$write_status" -eq 0 ] && grep -q '33u8' "$write_log"; then
-        record "$name" "NOT_CONFIRMED" "reassigned local array index folded correctly for read and write variants; logs: $read_log, $write_log"
+        record "ssa_array_index_const_miss" "NOT_CONFIRMED" "reassigned local array index folded correctly for read and write variants; logs: $read_log, $write_log"
     else
-        record "$name" "CONFIRMED_OR_CONTRACT_GAP" "reassigned local array index did not produce expected outputs; verify whether this source form is intended to be const-foldable; logs: $read_log, $write_log"
+        record "ssa_array_index_const_miss" "CONFIRMED_OR_CONTRACT_GAP" "reassigned local array index did not produce expected outputs; verify whether this source form is intended to be const-foldable; logs: $read_log, $write_log"
     fi
 }
 
