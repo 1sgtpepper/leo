@@ -20,9 +20,11 @@ jobs:
           cache-on-failure: true
 
       - name: Build Leo CLI
-        run: cargo build --package leo-lang --bin leo --release --locked --features noconfig
+        run: cargo build --package leo-lang --bin leo --locked --features noconfig
 
       - name: Run candidate repros
+        env:
+          LEO: ${{ github.workspace }}/target/debug/leo
         run: bash tools/repros/leo_candidate_repros.sh
 
       - name: Publish repro summary
