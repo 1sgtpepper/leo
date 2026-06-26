@@ -1,0 +1,119 @@
+name: Cache Warm
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "29 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  RUST_BACKTRACE: 0
+
+jobs:
+  warm-rust-cache:
+    name: Warm Rust cache (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            cache-key: leo-release-ubuntu
+            crate-cache-key: leo-release-crate-x86_64-unknown-linux-gnu
+            target: ""
+            docker-musl: "false"
+          - name: linux-musl
+            os: ubuntu-latest
+            cache-key: leo-release-linux-musl
+            crate-cache-key: leo-release-crate-x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-musl
+            docker-musl: "true"
+          - name: macos-x86
+            os: macos-14-large
+            cache-key: leo-release-macos-x86
+            crate-cache-key: leo-release-crate-x86_64-apple-darwin
+            target: ""
+            docker-musl: "false"
+          - name: macos-aarch64
+            os: macos-latest
+            cache-key: leo-release-macos-aarch64
+            crate-cache-key: leo-release-crate-aarch64-apple-darwin
+            target: aarch64-apple-darwin
+            docker-musl: "false"
+          - name: windows
+            os: windows-latest
+            cache-key: leo-release-windows
+            crate-cache-key: leo-release-crate-x86_64-pc-windows-msvc
+            target: ""
+            docker-musl: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Add target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install libclang
+        if: runner.os == 'Linux' && matrix.docker-musl != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y libclang-dev
+
+      - name: Install LLVM and Clang
+        if: runner.os == 'Windows'
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "11"
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Set LIBCLANG_PATH
+        if: runner.os == 'Windows'
+        run: echo "LIBCLANG_PATH=${{ runner.temp }}/llvm/lib" >> $env:GITHUB_ENV
+
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.cache-key }}
+          cache-on-failure: true
+
+      - name: Set up release-crate rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.crate-cache-key }}
+          cache-on-failure: true
+
+      - name: Build Leo
+        if: matrix.docker-musl != 'true'
+        shell: bash
+        run: |
+          TARGET_FLAG=""
+          if [ -n "${{ matrix.target }}" ]; then
+            TARGET_FLAG="--target ${{ matrix.target }}"
+          fi
+          cargo build --package leo-lang --release --locked --features noconfig $TARGET_FLAG
+
+      - name: Build Leo (musl)
+        if: matrix.docker-musl == 'true'
+        run: |
+          docker run \
+            -v ${{ github.workspace }}:/home/rust/src \
+            --rm \
+            -t docker.io/blackdex/rust-musl:x86_64-musl-stable \
+            bash -lc "
+              apt-get update -qq && apt-get install -y libclang-dev &&
+              rustup target add x86_64-unknown-linux-musl &&
+              cd /home/rust/src &&
+              cargo build --target x86_64-unknown-linux-musl --release --locked --package leo-lang --features noconfig
+            "
+          sudo chown -R "$(id -u):$(id -g)" target

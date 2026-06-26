@@ -32,6 +32,12 @@ jobs:
           toolchain: stable
           components: rustfmt
 
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-ubuntu
+          cache-on-failure: true
+
       - name: Install libclang
         run: sudo apt-get update -qq && sudo apt-get install -y libclang-dev
 
@@ -87,6 +93,12 @@ jobs:
           toolchain: stable
           components: rustfmt
           target: x86_64-unknown-linux-musl
+
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-linux-musl
+          cache-on-failure: true
 
       - name: Verify Cargo.lock Exists
         run: |
@@ -151,6 +163,12 @@ jobs:
           toolchain: stable
           components: rustfmt
 
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-macos-x86
+          cache-on-failure: true
+
       - name: Verify Cargo.lock Exists
         run: |
           if [ ! -f Cargo.lock ]; then
@@ -210,6 +228,11 @@ jobs:
           target: aarch64-apple-darwin
           components: rustfmt
 
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-macos-aarch64
+          cache-on-failure: true
 
       - name: Verify Cargo.lock Exists
         run: |
@@ -274,6 +297,12 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
+
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-windows
+          cache-on-failure: true
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
