@@ -200,6 +200,12 @@ jobs:
         shell: bash
         run: test -f Cargo.lock || (echo "::error::Cargo.lock missing" && exit 1)
 
+      - name: Set up rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: leo-release-crate-${{ matrix.target }}
+          cache-on-failure: true
+
       - name: Determine Build Flags
         id: flags
         shell: bash
