@@ -1,0 +1,36 @@
+name: SSA Fallible Sub Repro
+
+on:
+  push:
+    branches: [compiler-e2e-repros]
+    paths:
+      - ".github/workflows/repro-ssa-fallible-sub.yml"
+      - "tests/tests/execution/repro_ssa_fallible_sub_erased.leo"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: "1"
+      CARGO_TERM_COLOR: always
+      UPDATE_EXPECT: "1"
+      TEST_NAME: execution_repro_ssa_fallible_sub_erased_leo
+      EXPECTATION: tests/expectations/execution/repro_ssa_fallible_sub_erased.out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+      - run: cargo test -p leo-compiler --locked --features only_testnet "$TEST_NAME" -- --exact --nocapture
+      - run: cat "$EXPECTATION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssa-fallible-sub-output
+          path: ${{ env.EXPECTATION }}
+      - run: |
+          grep -q "status: success" "$EXPECTATION"
+          grep -q "output: 0u8" "$EXPECTATION"
+
