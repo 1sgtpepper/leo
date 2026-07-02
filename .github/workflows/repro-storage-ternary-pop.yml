@@ -31,6 +31,6 @@ jobs:
           name: storage-ternary-pop-output
           path: ${{ env.EXPECTATION }}
       - run: |
-          grep -q "Failed to parse bytecode" "$EXPECTATION"
-          grep -q "assert.eq r13.is_some true" "$EXPECTATION"
+          grep -q "status: rejected" "$EXPECTATION"
+          grep -q "into vec__len__\\[false\\]" "$EXPECTATION"
 

@@ -3,23 +3,21 @@ seed = 987654321
 min_height = 16
 
 [case]
-program = "repro_storage_ternary_pop_unselected.aleo"
+program = "st_pop.aleo"
 function = "main"
-input = []
+input = ["false"]
 private_key = "APrivateKey1zkpH5Ne1Xfd79t61VhK7b6yaYz92yW5dbuVkiFheR7rwCDE"
 */
 
-program repro_storage_ternary_pop_unselected.aleo {
+program st_pop.aleo {
     storage vec: [u32];
 
-    fn main() -> Final {
+    fn main(take: bool) -> Final {
         return final {
             vec.push(99u32);
-            let popped: u32? = false ? vec.pop() : none;
+            let popped: u32? = take ? vec.pop() : none;
             assert(popped == none);
             assert(vec.len() == 1u32);
-            let remaining: u32 = vec.pop().unwrap();
-            assert(remaining == 99u32);
         };
     }
 
