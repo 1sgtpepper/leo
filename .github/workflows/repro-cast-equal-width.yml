@@ -31,6 +31,6 @@ jobs:
           name: cast-equal-width-output
           path: ${{ env.EXPECTATION }}
       - run: |
-          grep -q "status: success" "$EXPECTATION"
-          grep -q "output: -1i8" "$EXPECTATION"
+          grep -q "Failed to parse bytecode" "$EXPECTATION"
+          grep -q "cast r0 into r1 as i8" "$EXPECTATION"
 

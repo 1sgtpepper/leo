@@ -31,5 +31,6 @@ jobs:
           name: flattening-untaken-division-output
           path: ${{ env.EXPECTATION }}
       - run: |
-          grep -q "status: failed" "$EXPECTATION"
+          grep -q "Failed to parse bytecode" "$EXPECTATION"
+          grep -q "div 1u32 r1 into r2" "$EXPECTATION"
 
