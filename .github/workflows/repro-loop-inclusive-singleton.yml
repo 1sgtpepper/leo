@@ -24,7 +24,7 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev
-      - run: cargo test -p leo-compiler --locked "$TEST_NAME" -- --exact --nocapture
+      - run: cargo test -p leo-compiler --locked "$TEST_NAME" -- --nocapture
       - run: cat "$EXPECTATION"
       - uses: actions/upload-artifact@v4
         with:
