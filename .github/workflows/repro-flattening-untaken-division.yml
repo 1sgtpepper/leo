@@ -30,5 +30,6 @@ jobs:
         with:
           name: flattening-untaken-division-output
           path: ${{ env.EXPECTATION }}
-      - run: grep -q "status: failed" "$EXPECTATION"
+      - run: |
+          grep -q "status: failed" "$EXPECTATION"
 

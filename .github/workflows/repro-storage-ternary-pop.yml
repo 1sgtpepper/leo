@@ -30,5 +30,6 @@ jobs:
         with:
           name: storage-ternary-pop-output
           path: ${{ env.EXPECTATION }}
-      - run: grep -q "status: rejected" "$EXPECTATION"
+      - run: |
+          grep -q "status: rejected" "$EXPECTATION"
 
