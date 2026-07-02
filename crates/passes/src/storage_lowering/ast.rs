@@ -20,6 +20,997 @@ use crate::expression_can_be_discarded;
 use leo_ast::*;
 use leo_span::{Span, Symbol, sym};
 
+use std::rc::Rc;
+
+type ExpressionContinuation = Rc<dyn for<'a> Fn(Expression, &mut StorageLoweringVisitor<'a>) -> Vec<Statement>>;
+type ExpressionListContinuation =
+    Rc<dyn for<'a> Fn(Vec<Expression>, &mut StorageLoweringVisitor<'a>) -> Vec<Statement>>;
+type OptionalExpressionContinuation =
+    Rc<dyn for<'a> Fn(Option<Box<Expression>>, &mut StorageLoweringVisitor<'a>) -> Vec<Statement>>;
+
+impl StorageLoweringVisitor<'_> {
+    fn copy_expression_type(&mut self, from: leo_ast::NodeID, to: leo_ast::NodeID) {
+        if from != to
+            && let Some(type_) = self.state.type_table.get(&from)
+        {
+            self.state.type_table.insert(to, type_);
+        }
+    }
+
+    /// Lower `expression` in a context that consumes its value.
+    ///
+    /// `AstReconstructor::AdditionalOutput` is an unconditional prelude. It is only sound for
+    /// subexpressions that are definitely evaluated in the current dynamic path. A source ternary's
+    /// condition is definitely evaluated, but its arms are not: statements produced by lowering the
+    /// true arm must execute exactly when the true arm is selected, and likewise for the false arm.
+    ///
+    /// Statement owners therefore use this continuation-passing emitter instead of the eager
+    /// expression reconstructor. The ternary rule is the invariant-preserving one:
+    ///
+    /// ```text
+    /// emit(c ? t : f, K) = emit(c, |c'| if c' { emit(t, K) } else { emit(f, K) })
+    /// ```
+    ///
+    /// This preserves strict source evaluation order for expression prefixes. Strict-prefix
+    /// contexts materialize non-discardable values before lowering the next sibling, while
+    /// ternary branches keep branch-produced values inside the branch that produced them. The
+    /// lowered finalizer never assigns a branch-local value into a parent scope and reads it
+    /// after the branch rejoins.
+    fn emit_expression_with_continuation(
+        &mut self,
+        expression: Expression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        match expression {
+            Expression::Array(input) => {
+                let mut input = input;
+                let elements = std::mem::take(&mut input.elements);
+                self.emit_expression_list_with_continuation(
+                    elements,
+                    Vec::new(),
+                    Rc::new(move |elements, this| {
+                        let mut input = input.clone();
+                        input.elements = elements;
+                        continuation.clone()(input.into(), this)
+                    }),
+                )
+            }
+            Expression::ArrayAccess(input) => {
+                let ArrayAccess { array, index, span, id } = *input;
+                let index_may_emit = Self::expression_may_emit_cps_statements(&index);
+                self.emit_expression_with_continuation(
+                    array,
+                    Rc::new(move |array, this| {
+                        let mut statements = Vec::new();
+                        let array = if index_may_emit {
+                            this.materialize_strict_prefix_expression(array, &mut statements)
+                        } else {
+                            array
+                        };
+                        let index = index.clone();
+                        let continuation = continuation.clone();
+                        statements.extend(this.emit_expression_with_continuation(
+                            index,
+                            Rc::new(move |index, this| {
+                                continuation.clone()(ArrayAccess { array: array.clone(), index, span, id }.into(), this)
+                            }),
+                        ));
+                        statements
+                    }),
+                )
+            }
+            Expression::Binary(input) => {
+                let BinaryExpression { left, right, op, span, id } = *input;
+                let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                self.emit_expression_with_continuation(
+                    left,
+                    Rc::new(move |left, this| {
+                        let mut statements = Vec::new();
+                        let left = if right_may_emit {
+                            this.materialize_strict_prefix_expression(left, &mut statements)
+                        } else {
+                            left
+                        };
+                        let right = right.clone();
+                        let continuation = continuation.clone();
+                        statements.extend(this.emit_expression_with_continuation(
+                            right,
+                            Rc::new(move |right, this| {
+                                continuation.clone()(
+                                    BinaryExpression { left: left.clone(), right, op, span, id }.into(),
+                                    this,
+                                )
+                            }),
+                        ));
+                        statements
+                    }),
+                )
+            }
+            Expression::Call(input) => {
+                let mut input = *input;
+                let const_arguments = std::mem::take(&mut input.const_arguments);
+                let arguments = std::mem::take(&mut input.arguments);
+                self.emit_expression_list_with_continuation(
+                    const_arguments,
+                    Vec::new(),
+                    Rc::new(move |const_arguments, this| {
+                        let input = input.clone();
+                        let arguments = arguments.clone();
+                        let continuation = continuation.clone();
+                        this.emit_expression_list_with_continuation(
+                            arguments,
+                            Vec::new(),
+                            Rc::new(move |arguments, this| {
+                                let mut input = input.clone();
+                                input.const_arguments = const_arguments.clone();
+                                input.arguments = arguments;
+                                this.emit_reconstructed_call(input, continuation.clone())
+                            }),
+                        )
+                    }),
+                )
+            }
+            Expression::Cast(input) => {
+                let CastExpression { expression, type_, span, id } = *input;
+                self.emit_expression_with_continuation(
+                    expression,
+                    Rc::new(move |expression, this| {
+                        continuation.clone()(CastExpression { expression, type_: type_.clone(), span, id }.into(), this)
+                    }),
+                )
+            }
+            Expression::Composite(input) => self.emit_composite_with_continuation(input, continuation),
+            Expression::DynamicOp(input) => self.emit_dynamic_op_with_continuation(*input, continuation),
+            Expression::Intrinsic(input) => self.emit_intrinsic_with_continuation(*input, continuation),
+            Expression::MemberAccess(input) => {
+                let MemberAccess { inner, name, span, id } = *input;
+                self.emit_expression_with_continuation(
+                    inner,
+                    Rc::new(move |inner, this| {
+                        continuation.clone()(MemberAccess { inner, name, span, id }.into(), this)
+                    }),
+                )
+            }
+            Expression::Repeat(input) => {
+                let RepeatExpression { expr, count, span, id } = *input;
+                let count_may_emit = Self::expression_may_emit_cps_statements(&count);
+                self.emit_expression_with_continuation(
+                    expr,
+                    Rc::new(move |expr, this| {
+                        let mut statements = Vec::new();
+                        let expr = if count_may_emit {
+                            this.materialize_strict_prefix_expression(expr, &mut statements)
+                        } else {
+                            expr
+                        };
+                        let count = count.clone();
+                        let continuation = continuation.clone();
+                        statements.extend(this.emit_expression_with_continuation(
+                            count,
+                            Rc::new(move |count, this| {
+                                continuation.clone()(
+                                    RepeatExpression { expr: expr.clone(), count, span, id }.into(),
+                                    this,
+                                )
+                            }),
+                        ));
+                        statements
+                    }),
+                )
+            }
+            Expression::Ternary(input) => self.emit_ternary_with_continuation(*input, continuation),
+            Expression::Tuple(input) => {
+                let mut input = input;
+                let elements = std::mem::take(&mut input.elements);
+                self.emit_expression_list_with_continuation(
+                    elements,
+                    Vec::new(),
+                    Rc::new(move |elements, this| {
+                        let mut input = input.clone();
+                        input.elements = elements;
+                        continuation.clone()(input.into(), this)
+                    }),
+                )
+            }
+            Expression::TupleAccess(input) => {
+                let TupleAccess { tuple, index, span, id } = *input;
+                self.emit_expression_with_continuation(
+                    tuple,
+                    Rc::new(move |tuple, this| {
+                        continuation.clone()(TupleAccess { tuple, index: index.clone(), span, id }.into(), this)
+                    }),
+                )
+            }
+            Expression::Unary(input) => {
+                let UnaryExpression { receiver, op, span, id } = *input;
+                self.emit_expression_with_continuation(
+                    receiver,
+                    Rc::new(move |receiver, this| {
+                        continuation.clone()(UnaryExpression { op, receiver, span, id }.into(), this)
+                    }),
+                )
+            }
+            expression => self.emit_reconstructed_expression(expression, continuation),
+        }
+    }
+
+    fn emit_reconstructed_expression(
+        &mut self,
+        expression: Expression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let source_id = expression.id();
+        let (expression, mut statements) = self.reconstruct_expression(expression, &());
+        self.copy_expression_type(source_id, expression.id());
+        statements.extend(continuation(expression, self));
+        statements
+    }
+
+    fn emit_reconstructed_call(
+        &mut self,
+        input: CallExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let source_id = input.id;
+        let (expression, mut statements) = self.reconstruct_call(input, &());
+        self.copy_expression_type(source_id, expression.id());
+        statements.extend(continuation(expression, self));
+        statements
+    }
+
+    fn emit_reconstructed_dynamic_op(
+        &mut self,
+        input: DynamicOpExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let source_id = input.id;
+        let (expression, mut statements) = self.reconstruct_dynamic_op(input, &());
+        self.copy_expression_type(source_id, expression.id());
+        statements.extend(continuation(expression, self));
+        statements
+    }
+
+    fn emit_reconstructed_intrinsic(
+        &mut self,
+        input: IntrinsicExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let source_id = input.id;
+        let (expression, mut statements) = self.reconstruct_intrinsic(input, &());
+        self.copy_expression_type(source_id, expression.id());
+        statements.extend(continuation(expression, self));
+        statements
+    }
+
+    fn materialize_strict_prefix_expression(
+        &mut self,
+        expression: Expression,
+        statements: &mut Vec<Statement>,
+    ) -> Expression {
+        if expression_can_be_discarded(&expression, self.state) {
+            return expression;
+        }
+
+        let Some(type_) = self.state.type_table.get(&expression.id()) else {
+            return expression;
+        };
+
+        let temp_sym = self.state.assigner.unique_symbol("$eval", "$");
+        let temp_ident = Identifier { name: temp_sym, span: Default::default(), id: self.state.node_builder.next_id() };
+        self.state.type_table.insert(temp_ident.id, type_);
+        statements.push(self.state.assigner.simple_definition(
+            temp_ident,
+            expression,
+            self.state.node_builder.next_id(),
+        ));
+        Path::from(temp_ident).to_local().into()
+    }
+
+    fn expression_may_emit_cps_statements(expression: &Expression) -> bool {
+        match expression {
+            Expression::Array(input) => input.elements.iter().any(Self::expression_may_emit_cps_statements),
+            Expression::ArrayAccess(input) => {
+                Self::expression_may_emit_cps_statements(&input.array)
+                    || Self::expression_may_emit_cps_statements(&input.index)
+            }
+            Expression::Binary(input) => {
+                Self::expression_may_emit_cps_statements(&input.left)
+                    || Self::expression_may_emit_cps_statements(&input.right)
+            }
+            Expression::Call(input) => {
+                input.const_arguments.iter().any(Self::expression_may_emit_cps_statements)
+                    || input.arguments.iter().any(Self::expression_may_emit_cps_statements)
+            }
+            Expression::Cast(input) => Self::expression_may_emit_cps_statements(&input.expression),
+            Expression::Composite(input) => {
+                input.const_arguments.iter().any(Self::expression_may_emit_cps_statements)
+                    || input
+                        .members
+                        .iter()
+                        .filter_map(|member| member.expression.as_ref())
+                        .any(Self::expression_may_emit_cps_statements)
+                    || input.base.as_deref().is_some_and(Self::expression_may_emit_cps_statements)
+            }
+            Expression::DynamicOp(_) => true,
+            Expression::Intrinsic(input) => {
+                matches!(
+                    Intrinsic::from_symbol(input.name, &input.type_parameters),
+                    Some(
+                        Intrinsic::VectorPush
+                            | Intrinsic::VectorPop
+                            | Intrinsic::VectorGet
+                            | Intrinsic::VectorSet
+                            | Intrinsic::VectorClear
+                            | Intrinsic::VectorSwapRemove
+                    )
+                ) || input.arguments.iter().any(Self::expression_may_emit_cps_statements)
+            }
+            Expression::MemberAccess(input) => Self::expression_may_emit_cps_statements(&input.inner),
+            Expression::Repeat(input) => {
+                Self::expression_may_emit_cps_statements(&input.expr)
+                    || Self::expression_may_emit_cps_statements(&input.count)
+            }
+            Expression::Ternary(_) => true,
+            Expression::Tuple(input) => input.elements.iter().any(Self::expression_may_emit_cps_statements),
+            Expression::TupleAccess(input) => Self::expression_may_emit_cps_statements(&input.tuple),
+            Expression::Unary(input) => Self::expression_may_emit_cps_statements(&input.receiver),
+            _ => false,
+        }
+    }
+
+    fn emit_expression_list_with_continuation(
+        &mut self,
+        remaining: Vec<Expression>,
+        rebuilt: Vec<Expression>,
+        continuation: ExpressionListContinuation,
+    ) -> Vec<Statement> {
+        let mut remaining_iter = remaining.into_iter();
+        let Some(next) = remaining_iter.next() else {
+            return continuation(rebuilt, self);
+        };
+        let rest = remaining_iter.collect::<Vec<_>>();
+
+        self.emit_expression_with_continuation(
+            next,
+            Rc::new(move |next, this| {
+                let mut statements = Vec::new();
+                let rest_may_emit = rest.iter().any(Self::expression_may_emit_cps_statements);
+                let next =
+                    if rest_may_emit { this.materialize_strict_prefix_expression(next, &mut statements) } else { next };
+                let mut rebuilt = rebuilt.clone();
+                rebuilt.push(next);
+                statements.extend(this.emit_expression_list_with_continuation(
+                    rest.clone(),
+                    rebuilt,
+                    continuation.clone(),
+                ));
+                statements
+            }),
+        )
+    }
+
+    fn emit_optional_boxed_expression_with_continuation(
+        &mut self,
+        expression: Option<Box<Expression>>,
+        continuation: OptionalExpressionContinuation,
+    ) -> Vec<Statement> {
+        match expression {
+            Some(expression) => self.emit_expression_with_continuation(
+                *expression,
+                Rc::new(move |expression, this| continuation.clone()(Some(Box::new(expression)), this)),
+            ),
+            None => continuation(None, self),
+        }
+    }
+
+    fn emit_ternary_with_continuation(
+        &mut self,
+        input: TernaryExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let TernaryExpression { condition, if_true, if_false, span, .. } = input;
+        self.emit_expression_with_continuation(
+            condition,
+            Rc::new(move |condition, this| {
+                let then_statements = this.emit_expression_with_continuation(if_true.clone(), continuation.clone());
+                let else_statements = this.emit_expression_with_continuation(if_false.clone(), continuation.clone());
+
+                vec![
+                    ConditionalStatement {
+                        condition,
+                        then: Block { statements: then_statements, span, id: this.state.node_builder.next_id() },
+                        otherwise: Some(Box::new(
+                            Block { statements: else_statements, span, id: this.state.node_builder.next_id() }.into(),
+                        )),
+                        span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into(),
+                ]
+            }),
+        )
+    }
+
+    fn emit_intrinsic_with_continuation(
+        &mut self,
+        mut input: IntrinsicExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        // Vector intrinsics use argument 0 as the storage vector path. The intrinsic-specific
+        // lowering validates and consumes that path, so only the value/index suffix is evaluated by
+        // the CPS emitter before the intrinsic is reconstructed.
+        let first_value_argument = match Intrinsic::from_symbol(input.name, &input.type_parameters) {
+            Some(Intrinsic::VectorPush)
+            | Some(Intrinsic::VectorLen)
+            | Some(Intrinsic::VectorPop)
+            | Some(Intrinsic::VectorGet)
+            | Some(Intrinsic::VectorSet)
+            | Some(Intrinsic::VectorClear)
+            | Some(Intrinsic::VectorSwapRemove) => 1,
+            _ => 0,
+        };
+
+        let suffix = input.arguments.split_off(first_value_argument);
+        self.emit_expression_list_with_continuation(
+            suffix,
+            Vec::new(),
+            Rc::new(move |suffix, this| {
+                let mut input = input.clone();
+                input.arguments.extend(suffix);
+                this.emit_reconstructed_intrinsic(input, continuation.clone())
+            }),
+        )
+    }
+
+    fn emit_dynamic_op_with_continuation(
+        &mut self,
+        mut input: DynamicOpExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let target_program = std::mem::take(&mut input.target_program);
+        self.emit_expression_with_continuation(
+            target_program,
+            Rc::new(move |target_program, this| {
+                let mut statements = Vec::new();
+                let target_program = this.materialize_strict_prefix_expression(target_program, &mut statements);
+                let mut input = input.clone();
+                input.target_program = target_program;
+                statements.extend(this.emit_dynamic_network_with_continuation(input, continuation.clone()));
+                statements
+            }),
+        )
+    }
+
+    fn emit_dynamic_network_with_continuation(
+        &mut self,
+        mut input: DynamicOpExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        if let Some(network) = input.network.take() {
+            self.emit_expression_with_continuation(
+                network,
+                Rc::new(move |network, this| {
+                    let mut statements = Vec::new();
+                    let network = this.materialize_strict_prefix_expression(network, &mut statements);
+                    let mut input = input.clone();
+                    input.network = Some(network);
+                    statements.extend(this.emit_dynamic_arguments_with_continuation(input, continuation.clone()));
+                    statements
+                }),
+            )
+        } else {
+            self.emit_dynamic_arguments_with_continuation(input, continuation)
+        }
+    }
+
+    fn emit_dynamic_arguments_with_continuation(
+        &mut self,
+        mut input: DynamicOpExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let dynamic_arguments = match &mut input.kind {
+            DynamicOpKind::Read { .. } => return self.emit_reconstructed_dynamic_op(input, continuation),
+            DynamicOpKind::Op { arguments, .. } | DynamicOpKind::Call { arguments, .. } => std::mem::take(arguments),
+        };
+
+        self.emit_expression_list_with_continuation(
+            dynamic_arguments,
+            Vec::new(),
+            Rc::new(move |arguments, this| {
+                let mut input = input.clone();
+                match &mut input.kind {
+                    DynamicOpKind::Read { .. } => unreachable!("read dynamic ops do not have arguments"),
+                    DynamicOpKind::Op { arguments: dynamic_arguments, .. }
+                    | DynamicOpKind::Call { arguments: dynamic_arguments, .. } => {
+                        *dynamic_arguments = arguments;
+                    }
+                }
+                this.emit_reconstructed_dynamic_op(input, continuation.clone())
+            }),
+        )
+    }
+
+    fn emit_composite_with_continuation(
+        &mut self,
+        mut input: CompositeExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let const_arguments = std::mem::take(&mut input.const_arguments);
+        self.emit_expression_list_with_continuation(
+            const_arguments,
+            Vec::new(),
+            Rc::new(move |const_arguments, this| {
+                let mut input = input.clone();
+                input.const_arguments = const_arguments;
+                this.emit_composite_members_with_continuation(input, 0, continuation.clone())
+            }),
+        )
+    }
+
+    fn emit_composite_members_with_continuation(
+        &mut self,
+        mut input: CompositeExpression,
+        index: usize,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        if index == input.members.len() {
+            return self.emit_composite_base_with_continuation(input, continuation);
+        }
+
+        let Some(expression) = input.members[index].expression.take() else {
+            return self.emit_composite_members_with_continuation(input, index + 1, continuation);
+        };
+
+        self.emit_expression_with_continuation(
+            expression,
+            Rc::new(move |expression, this| {
+                let mut statements = Vec::new();
+                let expression = this.materialize_strict_prefix_expression(expression, &mut statements);
+                let mut input = input.clone();
+                input.members[index].expression = Some(expression);
+                statements.extend(this.emit_composite_members_with_continuation(
+                    input,
+                    index + 1,
+                    continuation.clone(),
+                ));
+                statements
+            }),
+        )
+    }
+
+    fn emit_composite_base_with_continuation(
+        &mut self,
+        mut input: CompositeExpression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        self.emit_optional_boxed_expression_with_continuation(
+            input.base.take(),
+            Rc::new(move |base, this| {
+                let mut input = input.clone();
+                input.base = base;
+                continuation.clone()(input.into(), this)
+            }),
+        )
+    }
+
+    fn emit_assign_place_with_continuation(
+        &mut self,
+        place: Expression,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        match place {
+            Expression::ArrayAccess(input) => {
+                let ArrayAccess { array, index, span, id } = *input;
+                self.emit_assign_place_with_continuation(
+                    array,
+                    Rc::new(move |array, this| {
+                        let index = index.clone();
+                        let continuation = continuation.clone();
+                        this.emit_expression_with_continuation(
+                            index,
+                            Rc::new(move |index, this| {
+                                let mut statements = Vec::new();
+                                let index = this.materialize_strict_prefix_expression(index, &mut statements);
+                                statements.extend(continuation.clone()(
+                                    ArrayAccess { array: array.clone(), index, span, id }.into(),
+                                    this,
+                                ));
+                                statements
+                            }),
+                        )
+                    }),
+                )
+            }
+            Expression::MemberAccess(input) => {
+                let MemberAccess { inner, name, span, id } = *input;
+                self.emit_assign_place_with_continuation(
+                    inner,
+                    Rc::new(move |inner, this| {
+                        continuation.clone()(MemberAccess { inner, name, span, id }.into(), this)
+                    }),
+                )
+            }
+            Expression::TupleAccess(input) => {
+                let TupleAccess { tuple, index, span, id } = *input;
+                self.emit_assign_place_with_continuation(
+                    tuple,
+                    Rc::new(move |tuple, this| {
+                        continuation.clone()(
+                            TupleAccess { tuple: tuple.clone(), index: index.clone(), span, id }.into(),
+                            this,
+                        )
+                    }),
+                )
+            }
+            place => continuation(place, self),
+        }
+    }
+
+    fn reconstruct_block_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
+        let mut statement_iter = statements.into_iter();
+        let Some(statement) = statement_iter.next() else {
+            return Vec::new();
+        };
+        let tail = statement_iter.collect::<Vec<_>>();
+        self.reconstruct_statement_with_tail(statement, &tail)
+    }
+
+    fn reconstruct_statement_with_tail(&mut self, statement: Statement, tail: &[Statement]) -> Vec<Statement> {
+        match statement {
+            Statement::Assert(input) => self.reconstruct_assert_with_tail(input, tail),
+            Statement::Assign(input) => self.reconstruct_assign_with_tail(*input, tail),
+            Statement::Block(input) => self.reconstruct_block_with_tail(input, tail),
+            Statement::Conditional(input) => self.reconstruct_conditional_with_tail(input, tail),
+            Statement::Const(input) => self.reconstruct_const_with_tail(input, tail),
+            Statement::Definition(input) => self.reconstruct_definition_with_tail(input, tail),
+            Statement::Expression(input) => self.reconstruct_expression_statement_with_tail(input, tail),
+            Statement::Iteration(input) => self.reconstruct_iteration_with_tail(*input, tail),
+            Statement::Return(input) => self.reconstruct_return_with_tail(input),
+        }
+    }
+
+    fn statement_then_tail(&mut self, statement: Statement, tail: Vec<Statement>) -> Vec<Statement> {
+        let mut statements = vec![statement];
+        statements.extend(self.reconstruct_block_statements(tail));
+        statements
+    }
+
+    fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
+        let (block, additional_statements) = self.reconstruct_block(input);
+        debug_assert!(additional_statements.is_empty(), "block reconstruction returns no unconditional prelude");
+        self.statement_then_tail(block.into(), tail.to_vec())
+    }
+
+    fn reconstruct_const_with_tail(&mut self, input: ConstDeclaration, tail: &[Statement]) -> Vec<Statement> {
+        let (type_, mut statements) = self.reconstruct_type(input.type_.clone());
+        let tail = tail.to_vec();
+        statements.extend(self.emit_expression_with_continuation(
+            input.value.clone(),
+            Rc::new(move |value, this| {
+                let statement = ConstDeclaration { type_: type_.clone(), value, ..input.clone() }.into();
+                this.statement_then_tail(statement, tail.clone())
+            }),
+        ));
+        statements
+    }
+
+    fn reconstruct_definition_with_tail(&mut self, input: DefinitionStatement, tail: &[Statement]) -> Vec<Statement> {
+        let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
+        let tail = tail.to_vec();
+
+        self.emit_expression_with_continuation(
+            input.value.clone(),
+            Rc::new(move |value, this| {
+                let statement = DefinitionStatement {
+                    place: input.place.clone(),
+                    type_: type_.clone(),
+                    value,
+                    span: input.span,
+                    id: this.state.node_builder.next_id(),
+                }
+                .into();
+                this.statement_then_tail(statement, tail.clone())
+            }),
+        )
+    }
+
+    fn reconstruct_assert_with_tail(&mut self, input: AssertStatement, tail: &[Statement]) -> Vec<Statement> {
+        let tail = tail.to_vec();
+
+        match input.variant.clone() {
+            AssertVariant::Assert(expression) => self.emit_expression_with_continuation(
+                expression,
+                Rc::new(move |expression, this| {
+                    let statement = AssertStatement {
+                        variant: AssertVariant::Assert(expression),
+                        span: input.span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into();
+                    this.statement_then_tail(statement, tail.clone())
+                }),
+            ),
+            AssertVariant::AssertEq(left, right) => self.emit_expression_with_continuation(
+                left,
+                Rc::new(move |left, this| {
+                    let mut statements = Vec::new();
+                    let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                    let left = if right_may_emit {
+                        this.materialize_strict_prefix_expression(left, &mut statements)
+                    } else {
+                        left
+                    };
+                    let input = input.clone();
+                    let right = right.clone();
+                    let tail = tail.clone();
+                    statements.extend(this.emit_expression_with_continuation(
+                        right,
+                        Rc::new(move |right, this| {
+                            let statement = AssertStatement {
+                                variant: AssertVariant::AssertEq(left.clone(), right),
+                                span: input.span,
+                                id: this.state.node_builder.next_id(),
+                            }
+                            .into();
+                            this.statement_then_tail(statement, tail.clone())
+                        }),
+                    ));
+                    statements
+                }),
+            ),
+            AssertVariant::AssertNeq(left, right) => self.emit_expression_with_continuation(
+                left,
+                Rc::new(move |left, this| {
+                    let mut statements = Vec::new();
+                    let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                    let left = if right_may_emit {
+                        this.materialize_strict_prefix_expression(left, &mut statements)
+                    } else {
+                        left
+                    };
+                    let input = input.clone();
+                    let right = right.clone();
+                    let tail = tail.clone();
+                    statements.extend(this.emit_expression_with_continuation(
+                        right,
+                        Rc::new(move |right, this| {
+                            let statement = AssertStatement {
+                                variant: AssertVariant::AssertNeq(left.clone(), right),
+                                span: input.span,
+                                id: this.state.node_builder.next_id(),
+                            }
+                            .into();
+                            this.statement_then_tail(statement, tail.clone())
+                        }),
+                    ));
+                    statements
+                }),
+            ),
+        }
+    }
+
+    fn reconstruct_assign_with_tail(&mut self, input: AssignStatement, tail: &[Statement]) -> Vec<Statement> {
+        let AssignStatement { place, value, span, .. } = input;
+        let tail = tail.to_vec();
+
+        if let Expression::Path(path) = &place
+            && let Some(global_location) = path.try_global_location()
+        {
+            let var = self
+                .state
+                .symbol_table
+                .lookup_global(self.program, global_location)
+                .expect("A global path must point to a global");
+            assert!(
+                var.type_.as_ref().expect("must be known by now").is_optional(),
+                "Only storage variables that are not vectors or mappings are expected here."
+            );
+
+            let var_name = path.identifier().name;
+            let mapping_symbol = Symbol::intern(&format!("{var_name}__"));
+            return self.emit_expression_with_continuation(
+                value,
+                Rc::new(move |new_value, this| {
+                    let mapping_ident = Identifier::new(mapping_symbol, this.state.node_builder.next_id());
+                    let mapping_expr: Expression =
+                        Path::from(mapping_ident).to_global(Location::new(this.program, vec![mapping_symbol])).into();
+                    let false_literal: Expression =
+                        Literal::boolean(false, Span::default(), this.state.node_builder.next_id()).into();
+                    let statement =
+                        if matches!(&new_value, Expression::Literal(Literal { variant: LiteralVariant::None, .. })) {
+                            let remove_expr: Expression = IntrinsicExpression {
+                                name: sym::_mapping_remove,
+                                type_parameters: vec![],
+                                input_types: vec![],
+                                return_types: vec![],
+                                arguments: vec![mapping_expr, false_literal],
+                                span,
+                                id: this.state.node_builder.next_id(),
+                            }
+                            .into();
+                            Statement::Expression(ExpressionStatement {
+                                expression: remove_expr,
+                                span,
+                                id: this.state.node_builder.next_id(),
+                            })
+                        } else {
+                            let set_expr: Expression = IntrinsicExpression {
+                                name: sym::_mapping_set,
+                                type_parameters: vec![],
+                                input_types: vec![],
+                                return_types: vec![],
+                                arguments: vec![mapping_expr, false_literal, new_value],
+                                span,
+                                id: this.state.node_builder.next_id(),
+                            }
+                            .into();
+                            Statement::Expression(ExpressionStatement {
+                                expression: set_expr,
+                                span,
+                                id: this.state.node_builder.next_id(),
+                            })
+                        };
+
+                    this.statement_then_tail(statement, tail.clone())
+                }),
+            );
+        }
+
+        self.emit_assign_place_with_continuation(
+            place,
+            Rc::new(move |place, this| {
+                let value = value.clone();
+                let tail = tail.clone();
+                this.emit_expression_with_continuation(
+                    value,
+                    Rc::new(move |value, this| {
+                        let statement = AssignStatement {
+                            place: place.clone(),
+                            value,
+                            span,
+                            id: this.state.node_builder.next_id(),
+                        }
+                        .into();
+                        this.statement_then_tail(statement, tail.clone())
+                    }),
+                )
+            }),
+        )
+    }
+
+    fn reconstruct_expression_statement_with_tail(
+        &mut self,
+        input: ExpressionStatement,
+        tail: &[Statement],
+    ) -> Vec<Statement> {
+        let keep_expression = !expression_can_be_discarded(&input.expression, self.state);
+        let tail = tail.to_vec();
+
+        self.emit_expression_with_continuation(
+            input.expression.clone(),
+            Rc::new(move |expression, this| {
+                let legal_expression_statement =
+                    matches!(expression, Expression::Call(_) | Expression::DynamicOp(_) | Expression::Intrinsic(_));
+                let statement = if legal_expression_statement {
+                    ExpressionStatement { expression, span: input.span, id: this.state.node_builder.next_id() }.into()
+                } else if keep_expression {
+                    let discard_sym = this.state.assigner.unique_symbol("$discard", "$");
+                    let discard_ident =
+                        Identifier { name: discard_sym, span: input.span, id: this.state.node_builder.next_id() };
+                    if let Some(type_) = this.state.type_table.get(&expression.id()) {
+                        this.state.type_table.insert(discard_ident.id, type_);
+                    }
+                    DefinitionStatement {
+                        place: DefinitionPlace::Single(discard_ident),
+                        type_: None,
+                        value: expression,
+                        span: input.span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into()
+                } else {
+                    ExpressionStatement {
+                        expression: UnitExpression { span: input.span, id: this.state.node_builder.next_id() }.into(),
+                        span: input.span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into()
+                };
+                this.statement_then_tail(statement, tail.clone())
+            }),
+        )
+    }
+
+    fn reconstruct_conditional_with_tail(&mut self, input: ConditionalStatement, tail: &[Statement]) -> Vec<Statement> {
+        let tail = tail.to_vec();
+
+        self.emit_expression_with_continuation(
+            input.condition.clone(),
+            Rc::new(move |condition, this| {
+                let (then, then_statements) = this.reconstruct_block(input.then.clone());
+                debug_assert!(then_statements.is_empty(), "block reconstruction returns no unconditional prelude");
+                let otherwise =
+                    input.otherwise.clone().map(|otherwise| this.reconstruct_otherwise_statement(*otherwise));
+                let statement = ConditionalStatement {
+                    condition,
+                    then,
+                    otherwise,
+                    span: input.span,
+                    id: this.state.node_builder.next_id(),
+                }
+                .into();
+                this.statement_then_tail(statement, tail.clone())
+            }),
+        )
+    }
+
+    fn reconstruct_otherwise_statement(&mut self, statement: Statement) -> Box<Statement> {
+        let mut statements = self.reconstruct_statement_with_tail(statement, &[]);
+        if statements.len() == 1 {
+            Box::new(statements.pop().unwrap())
+        } else {
+            let span = statements
+                .iter()
+                .map(|statement| statement.span())
+                .reduce(|left, right| left + right)
+                .unwrap_or_default();
+            Box::new(Block { statements, span, id: self.state.node_builder.next_id() }.into())
+        }
+    }
+
+    fn reconstruct_iteration_with_tail(&mut self, input: IterationStatement, tail: &[Statement]) -> Vec<Statement> {
+        let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
+        let tail = tail.to_vec();
+
+        self.emit_expression_with_continuation(
+            input.start.clone(),
+            Rc::new(move |start, this| {
+                let mut statements = Vec::new();
+                let start = this.materialize_strict_prefix_expression(start, &mut statements);
+                let input = input.clone();
+                let type_ = type_.clone();
+                let tail = tail.clone();
+                statements.extend(this.emit_expression_with_continuation(
+                    input.stop.clone(),
+                    Rc::new(move |stop, this| {
+                        let (block, block_statements) = this.reconstruct_block(input.block.clone());
+                        debug_assert!(
+                            block_statements.is_empty(),
+                            "block reconstruction returns no unconditional prelude"
+                        );
+                        let statement = IterationStatement {
+                            variable: input.variable,
+                            type_: type_.clone(),
+                            start: start.clone(),
+                            stop,
+                            inclusive: input.inclusive,
+                            block,
+                            span: input.span,
+                            id: this.state.node_builder.next_id(),
+                        }
+                        .into();
+                        this.statement_then_tail(statement, tail.clone())
+                    }),
+                ));
+                statements
+            }),
+        )
+    }
+
+    fn reconstruct_return_with_tail(&mut self, input: ReturnStatement) -> Vec<Statement> {
+        self.emit_expression_with_continuation(
+            input.expression.clone(),
+            Rc::new(move |expression, this| {
+                vec![ReturnStatement { expression, span: input.span, id: this.state.node_builder.next_id() }.into()]
+            }),
+        )
+    }
+
+    fn split_emitted_statement(&mut self, mut statements: Vec<Statement>) -> (Statement, Vec<Statement>) {
+        let statement = statements.pop().expect("statement reconstruction should emit at least one statement");
+        (statement, statements)
+    }
+}
 impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
     type AdditionalInput = ();
     type AdditionalOutput = Vec<Statement>;
@@ -121,7 +1112,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                         value,
                         self.state.node_builder.next_id(),
                     ));
-                    value_var_ident.into()
+                    Path::from(value_var_ident).to_local().into()
                 } else {
                     value
                 };
@@ -139,7 +1130,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     get_len_expr,
                     self.state.node_builder.next_id(),
                 );
-                let len_var_expr: Expression = len_var_ident.into();
+                let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
                 // index + 1
                 let literal_one = self.literal_one_u32();
@@ -217,7 +1208,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     get_len_expr,
                     self.state.node_builder.next_id(),
                 );
-                let len_var_expr: Expression = len_var_ident.into();
+                let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
                 // $len_var > 0
                 let literal_zero = self.literal_zero_u32();
@@ -296,7 +1287,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                         reconstructed_key_expr,
                         self.state.node_builder.next_id(),
                     ));
-                    key_var_ident.into()
+                    Path::from(key_var_ident).to_local().into()
                 } else {
                     reconstructed_key_expr
                 };
@@ -321,7 +1312,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     get_len_expr,
                     self.state.node_builder.next_id(),
                 );
-                let len_var_expr: Expression = len_var_ident.into();
+                let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
                 // index < len
                 let index_lt_len_expr =
@@ -381,7 +1372,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     get_len_expr,
                     self.state.node_builder.next_id(),
                 );
-                let len_var_expr: Expression = len_var_ident.into();
+                let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
                 // index < $len_var
                 let index_lt_len_expr =
@@ -480,7 +1471,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     get_len_expr,
                     self.state.node_builder.next_id(),
                 );
-                let len_var_expr: Expression = len_var_ident.into();
+                let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
                 // assert(index < $len_var);
                 let index_lt_len_expr =
@@ -538,7 +1529,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
 
                 // Return `$removed` as the resulting expression
                 (
-                    removed_ident.into(),
+                    Path::from(removed_ident).to_local().into(),
                     [index_stmts, vec![len_stmt, assert_stmt, removed_stmt, set_swap_stmt, set_len_stmt]].concat(),
                 )
             }
@@ -793,6 +1784,9 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
         input: TernaryExpression,
         _addiional: &(),
     ) -> (Expression, Self::AdditionalOutput) {
+        // This legacy expression reconstructor can only return an unconditional prelude. Statement
+        // owner contexts use `emit_expression_with_continuation`, whose ternary rule keeps arm-local
+        // effects and consumers inside the selected branch.
         let (condition, mut statements) = self.reconstruct_expression(input.condition, &());
         let (if_true, statements2) = self.reconstruct_expression(input.if_true, &());
         let (if_false, statements3) = self.reconstruct_expression(input.if_false, &());
@@ -953,28 +1947,14 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
     }
 
     fn reconstruct_block(&mut self, block: Block) -> (Block, Self::AdditionalOutput) {
-        let mut statements = Vec::with_capacity(block.statements.len());
-
-        // Flatten each statement, accumulating any new statements produced.
-        for statement in block.statements {
-            let (reconstructed_statement, additional_statements) = self.reconstruct_statement(statement);
-            statements.extend(additional_statements);
-            statements.push(reconstructed_statement);
-        }
+        let statements = self.reconstruct_block_statements(block.statements);
 
         (Block { span: block.span, statements, id: self.state.node_builder.next_id() }, Default::default())
     }
 
     fn reconstruct_conditional(&mut self, input: leo_ast::ConditionalStatement) -> (Statement, Self::AdditionalOutput) {
-        let (condition, mut statements) = self.reconstruct_expression(input.condition, &());
-        let (then, statements2) = self.reconstruct_block(input.then);
-        statements.extend(statements2);
-        let otherwise = input.otherwise.map(|oth| {
-            let (expr, statements3) = self.reconstruct_statement(*oth);
-            statements.extend(statements3);
-            Box::new(expr)
-        });
-        (ConditionalStatement { condition, then, otherwise, ..input }.into(), statements)
+        let statements = self.reconstruct_conditional_with_tail(input, &[]);
+        self.split_emitted_statement(statements)
     }
 
     fn reconstruct_const(&mut self, input: ConstDeclaration) -> (Statement, Self::AdditionalOutput) {

@@ -299,7 +299,7 @@ impl StorageLoweringVisitor<'_> {
                 index_expr,
                 self.state.node_builder.next_id(),
             ));
-            index_var_ident.into()
+            Path::from(index_var_ident).to_local().into()
         } else {
             index_expr
         };
@@ -325,7 +325,7 @@ impl StorageLoweringVisitor<'_> {
             Identifier { name: len_var_sym, span: Default::default(), id: self.state.node_builder.next_id() };
         let len_stmt =
             self.state.assigner.simple_definition(len_var_ident, get_len_expr, self.state.node_builder.next_id());
-        let len_var_expr: Expression = len_var_ident.into();
+        let len_var_expr: Expression = Path::from(len_var_ident).to_local().into();
 
         let index_lt_len_expr = self.binary_expr(index_expr.clone(), BinaryOperation::Lt, len_var_expr);
 
