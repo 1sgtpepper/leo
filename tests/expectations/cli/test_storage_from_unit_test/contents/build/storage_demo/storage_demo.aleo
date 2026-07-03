@@ -179,12 +179,19 @@ finalize pop_history:
     sub.w r0 1u32 into r2;
     ternary r1 r2 r0 into r3;
     set r3 into history__len__[false];
+    branch.eq r1 false to end_then_0_0;
     get.or_use history__[r2] 0u32 into r4;
-    ternary r1 r4 0u32 into r5;
-    cast r1 r5 into r6 as Optional__JzunLORyB8U;
-    cast false 0u32 into r7 as Optional__JzunLORyB8U;
-    is.neq r6 r7 into r8;
-    assert.eq r8 true;
+    cast true r4 into r5 as Optional__JzunLORyB8U;
+    cast false 0u32 into r6 as Optional__JzunLORyB8U;
+    is.neq r5 r6 into r7;
+    assert.eq r7 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u32 into r8 as Optional__JzunLORyB8U;
+    cast false 0u32 into r9 as Optional__JzunLORyB8U;
+    is.neq r8 r9 into r10;
+    assert.eq r10 true;
+    position end_otherwise_0_1;
 
 function set_history:
     input r0 as u32.private;
