@@ -3,6 +3,7 @@ program test.aleo {
     constructor() {}
 
     mapping branch_map: u32 => u32;
+    storage optional_slot: u32;
     storage len_vec: [u32];
 
     fn mapping_get_unselected(public take: bool) -> Final {
@@ -23,6 +24,13 @@ program test.aleo {
         return final {
             let value: bool = take ? branch_map.contains(0u32) : false;
             assert(!value);
+        };
+    }
+
+    fn optional_path_unselected(public take: bool) -> Final {
+        return final {
+            let value: u32? = take ? optional_slot : none;
+            assert(value == none);
         };
     }
 

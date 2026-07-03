@@ -445,14 +445,34 @@ impl StorageLoweringVisitor<'_> {
         let true_arm_may_emit = Self::expression_may_emit_cps_statements(&if_true);
         let false_arm_may_emit = Self::expression_may_emit_cps_statements(&if_false);
         if !true_arm_may_emit && !false_arm_may_emit {
+            let optional_type_for_reconstructed = optional_type.clone();
+            let if_true_for_reconstruction = if_true.clone();
+            let if_false_for_reconstruction = if_false.clone();
             return self.emit_expression_with_continuation(
                 condition,
                 Rc::new(move |condition, this| {
-                    let (if_true, true_statements) = this.reconstruct_expression(if_true.clone(), &());
-                    let (if_false, false_statements) = this.reconstruct_expression(if_false.clone(), &());
-                    debug_assert!(true_statements.is_empty(), "pure ternary true arm emitted statements");
-                    debug_assert!(false_statements.is_empty(), "pure ternary false arm emitted statements");
-                    continuation.clone()(TernaryExpression { condition, if_true, if_false, span, id }.into(), this)
+                    let (if_true, true_prefix) = this.reconstruct_expression(if_true_for_reconstruction.clone(), &());
+                    let (if_false, false_prefix) =
+                        this.reconstruct_expression(if_false_for_reconstruction.clone(), &());
+
+                    if true_prefix.is_empty()
+                        && false_prefix.is_empty()
+                        && !Self::expression_requires_branch_cps(&if_true)
+                        && !Self::expression_requires_branch_cps(&if_false)
+                    {
+                        continuation.clone()(TernaryExpression { condition, if_true, if_false, span, id }.into(), this)
+                    } else {
+                        this.emit_ternary_branches_with_continuation(
+                            condition,
+                            if_true,
+                            if_false,
+                            true_prefix,
+                            false_prefix,
+                            optional_type_for_reconstructed.clone(),
+                            span,
+                            continuation.clone(),
+                        )
+                    }
                 }),
             );
         }
@@ -460,57 +480,83 @@ impl StorageLoweringVisitor<'_> {
         self.emit_expression_with_continuation(
             condition,
             Rc::new(move |condition, this| {
-                let optional_type_for_true = optional_type.clone();
-                let optional_type_for_false = optional_type.clone();
-                let true_continuation = continuation.clone();
-                let false_continuation = continuation.clone();
-                let then_statements = this.emit_expression_with_continuation(
+                this.emit_ternary_branches_with_continuation(
+                    condition,
                     if_true.clone(),
-                    Rc::new(move |if_true, this| {
-                        let mut statements = Vec::new();
-                        let if_true = if let Some(optional_type) = optional_type_for_true.clone() {
-                            let (if_true, branch_statements) =
-                                this.bind_optional_ternary_branch(if_true, optional_type, span);
-                            statements.extend(branch_statements);
-                            if_true
-                        } else {
-                            if_true
-                        };
-                        statements.extend(true_continuation.clone()(if_true, this));
-                        statements
-                    }),
-                );
-                let else_statements = this.emit_expression_with_continuation(
                     if_false.clone(),
-                    Rc::new(move |if_false, this| {
-                        let mut statements = Vec::new();
-                        let if_false = if let Some(optional_type) = optional_type_for_false.clone() {
-                            let (if_false, branch_statements) =
-                                this.bind_optional_ternary_branch(if_false, optional_type, span);
-                            statements.extend(branch_statements);
-                            if_false
-                        } else {
-                            if_false
-                        };
-                        statements.extend(false_continuation.clone()(if_false, this));
-                        statements
-                    }),
-                );
-
-                vec![
-                    ConditionalStatement {
-                        condition,
-                        then: Block { statements: then_statements, span, id: this.state.node_builder.next_id() },
-                        otherwise: Some(Box::new(
-                            Block { statements: else_statements, span, id: this.state.node_builder.next_id() }.into(),
-                        )),
-                        span,
-                        id: this.state.node_builder.next_id(),
-                    }
-                    .into(),
-                ]
+                    Vec::new(),
+                    Vec::new(),
+                    optional_type.clone(),
+                    span,
+                    continuation.clone(),
+                )
             }),
         )
+    }
+
+    fn emit_ternary_branches_with_continuation(
+        &mut self,
+        condition: Expression,
+        if_true: Expression,
+        if_false: Expression,
+        true_prefix: Vec<Statement>,
+        false_prefix: Vec<Statement>,
+        optional_type: Option<Type>,
+        span: Span,
+        continuation: ExpressionContinuation,
+    ) -> Vec<Statement> {
+        let optional_type_for_true = optional_type.clone();
+        let optional_type_for_false = optional_type.clone();
+        let true_continuation = continuation.clone();
+        let false_continuation = continuation.clone();
+
+        let mut then_statements = true_prefix;
+        then_statements.extend(self.emit_expression_with_continuation(
+            if_true,
+            Rc::new(move |if_true, this| {
+                let mut statements = Vec::new();
+                let if_true = if let Some(optional_type) = optional_type_for_true.clone() {
+                    let (if_true, branch_statements) = this.bind_optional_ternary_branch(if_true, optional_type, span);
+                    statements.extend(branch_statements);
+                    if_true
+                } else {
+                    if_true
+                };
+                statements.extend(true_continuation.clone()(if_true, this));
+                statements
+            }),
+        ));
+
+        let mut else_statements = false_prefix;
+        else_statements.extend(self.emit_expression_with_continuation(
+            if_false,
+            Rc::new(move |if_false, this| {
+                let mut statements = Vec::new();
+                let if_false = if let Some(optional_type) = optional_type_for_false.clone() {
+                    let (if_false, branch_statements) =
+                        this.bind_optional_ternary_branch(if_false, optional_type, span);
+                    statements.extend(branch_statements);
+                    if_false
+                } else {
+                    if_false
+                };
+                statements.extend(false_continuation.clone()(if_false, this));
+                statements
+            }),
+        ));
+
+        vec![
+            ConditionalStatement {
+                condition,
+                then: Block { statements: then_statements, span, id: self.state.node_builder.next_id() },
+                otherwise: Some(Box::new(
+                    Block { statements: else_statements, span, id: self.state.node_builder.next_id() }.into(),
+                )),
+                span,
+                id: self.state.node_builder.next_id(),
+            }
+            .into(),
+        ]
     }
 
     fn bind_optional_ternary_branch(
