@@ -1,7 +1,15 @@
 program test.aleo;
 
+struct Optional__JzunLORyB8U:
+    is_some as boolean;
+    val as u32;
+
 mapping branch_map:
     key as u32.public;
+    value as u32.public;
+
+mapping optional_slot__:
+    key as boolean.public;
     value as u32.public;
 
 mapping len_vec__:
@@ -55,6 +63,36 @@ finalize mapping_contains_unselected:
     assert.eq r2 true;
     branch.eq true true to end_otherwise_0_1;
     position end_then_0_0;
+    position end_otherwise_0_1;
+
+function optional_path_unselected:
+    input r0 as boolean.public;
+    async optional_path_unselected r0 into r1;
+    output r1 as test.aleo/optional_path_unselected.future;
+
+finalize optional_path_unselected:
+    input r0 as boolean.public;
+    branch.eq r0 false to end_then_0_0;
+    contains optional_slot__[false] into r1;
+    branch.eq r1 false to end_then_1_2;
+    get.or_use optional_slot__[false] 0u32 into r2;
+    cast true r2 into r3 as Optional__JzunLORyB8U;
+    cast false 0u32 into r4 as Optional__JzunLORyB8U;
+    is.eq r3 r4 into r5;
+    assert.eq r5 true;
+    branch.eq true true to end_otherwise_1_3;
+    position end_then_1_2;
+    cast false 0u32 into r6 as Optional__JzunLORyB8U;
+    cast false 0u32 into r7 as Optional__JzunLORyB8U;
+    is.eq r6 r7 into r8;
+    assert.eq r8 true;
+    position end_otherwise_1_3;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u32 into r9 as Optional__JzunLORyB8U;
+    cast false 0u32 into r10 as Optional__JzunLORyB8U;
+    is.eq r9 r10 into r11;
+    assert.eq r11 true;
     position end_otherwise_0_1;
 
 function vector_len_unselected:
