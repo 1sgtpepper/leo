@@ -15,7 +15,7 @@
 // along with the Leo library. If not, see <https://www.gnu.org/licenses/>.
 
 use super::StorageLoweringVisitor;
-use crate::expression_can_be_discarded;
+use crate::{SymbolAccessCollector, expression_can_be_discarded};
 
 use leo_ast::*;
 use leo_span::{Span, Symbol, sym};
@@ -54,8 +54,8 @@ impl StorageLoweringVisitor<'_> {
     /// This preserves strict source evaluation order for expression prefixes. Strict-prefix
     /// contexts materialize non-discardable values before lowering the next sibling, while
     /// ternary branches keep branch-produced effects inside the branch that selected them. When
-    /// a later statement needs a branch-produced value, statement lowering predeclares a local
-    /// and assigns each branch into it; the existing SSA pass then owns the post-branch join.
+    /// a branch-local definition is used by following statements, statement lowering replays only
+    /// the tail slice that still references that local and rejoins after the last use.
     fn emit_expression_with_continuation(
         &mut self,
         expression: Expression,
@@ -320,28 +320,6 @@ impl StorageLoweringVisitor<'_> {
             self.state.node_builder.next_id(),
         ));
         Path::from(temp_ident).to_local().into()
-    }
-
-    fn default_expression_for_type(&mut self, type_: &Type, span: Span) -> Expression {
-        match type_ {
-            Type::Optional(OptionalType { inner }) => self.literal_none_optional(*inner.clone()),
-            Type::Unit => {
-                let id = self.state.node_builder.next_id();
-                self.state.type_table.insert(id, Type::Unit);
-                UnitExpression { span, id }.into()
-            }
-            _ => {
-                let expression = self.zero(type_);
-                self.state.type_table.insert(expression.id(), type_.clone());
-                expression
-            }
-        }
-    }
-
-    fn local_path_for_type(&mut self, identifier: Identifier, type_: Type) -> Expression {
-        let path: Expression = Path::from(identifier).to_local().into();
-        self.state.type_table.insert(path.id(), type_);
-        path
     }
 
     fn expression_may_emit_cps_statements(expression: &Expression) -> bool {
@@ -898,6 +876,27 @@ impl StorageLoweringVisitor<'_> {
         statements
     }
 
+    fn split_tail_after_last_local_use(
+        &mut self,
+        tail: &[Statement],
+        symbol: Symbol,
+    ) -> (Vec<Statement>, Vec<Statement>) {
+        let mut split_index = 0;
+        for (index, statement) in tail.iter().enumerate() {
+            if self.statement_uses_local_symbol(statement, symbol) {
+                split_index = index + 1;
+            }
+        }
+
+        (tail[..split_index].to_vec(), tail[split_index..].to_vec())
+    }
+
+    fn statement_uses_local_symbol(&mut self, statement: &Statement, symbol: Symbol) -> bool {
+        let mut collector = SymbolAccessCollector::new(self.state);
+        collector.visit_statement(statement);
+        collector.symbol_accesses.iter().any(|(path, _)| path.is_local() && path.identifier().name == symbol)
+    }
+
     fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
         let (block, additional_statements) = self.reconstruct_block(input);
         debug_assert!(additional_statements.is_empty(), "block reconstruction returns no unconditional prelude");
@@ -922,33 +921,22 @@ impl StorageLoweringVisitor<'_> {
         let tail = tail.to_vec();
 
         if let DefinitionPlace::Single(identifier) = input.place {
-            let type_ = type_
-                .clone()
-                .or_else(|| self.expression_type_for_materialization(&input.value))
-                .expect("storage lowering should know the type before branch-result materialization");
-            self.state.type_table.insert(identifier.id, type_.clone());
-
-            let initial_value = self.default_expression_for_type(&type_, input.span);
-            let initial_definition = DefinitionStatement {
-                place: DefinitionPlace::Single(identifier),
-                type_: Some(type_.clone()),
-                value: initial_value,
-                span: input.span,
-                id: self.state.node_builder.next_id(),
-            };
-
-            let mut statements = vec![initial_definition.into()];
-            statements.extend(self.emit_expression_with_continuation(
+            let (branch_tail, remaining_tail) = self.split_tail_after_last_local_use(&tail, identifier.name);
+            let statements = self.emit_expression_with_continuation(
                 input.value.clone(),
                 Rc::new(move |value, this| {
-                    let place = this.local_path_for_type(identifier, type_.clone());
-                    vec![
-                        AssignStatement { place, value, span: input.span, id: this.state.node_builder.next_id() }
-                            .into(),
-                    ]
+                    let statement = DefinitionStatement {
+                        place: DefinitionPlace::Single(identifier),
+                        type_: type_.clone(),
+                        value,
+                        span: input.span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into();
+                    this.statement_then_tail(statement, branch_tail.clone())
                 }),
-            ));
-            return self.emitted_statements_then_tail(statements, &tail);
+            );
+            return self.emitted_statements_then_tail(statements, &remaining_tail);
         }
 
         self.emit_expression_with_continuation(
