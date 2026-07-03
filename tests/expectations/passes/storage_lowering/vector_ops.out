@@ -18,15 +18,29 @@ program singleton_storage.aleo {
         return async {
             let $len_var$1 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
             _mapping_set(singleton_storage.aleo::vec__len__, false, $len_var$1 > 0u32 ? $len_var$1.sub_wrapped(1u32) : $len_var$1);
-            let x = $len_var$1 > 0u32 ? _mapping_get_or_use(singleton_storage.aleo::vec__, $len_var$1.sub_wrapped(1u32), 0u8) : none;
-            assert(x != none);
+            if $len_var$1 > 0u32 {
+                let $ternary_branch$2: u8? = _mapping_get_or_use(singleton_storage.aleo::vec__, $len_var$1.sub_wrapped(1u32), 0u8);
+                let x = $ternary_branch$2;
+                assert(x != none);
+            } else {
+                let $ternary_branch$3: u8? = none;
+                let x = $ternary_branch$3;
+                assert(x != none);
+            }
         };
     }
     fn get() -> Final<Fn()> {
         return async {
-            let $len_var$2 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
-            let x = 3u32 < $len_var$2 ? _mapping_get_or_use(singleton_storage.aleo::vec__, 3u32, 0u8) : none;
-            assert(x != none);
+            let $len_var$4 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
+            if 3u32 < $len_var$4 {
+                let $ternary_branch$5: u8? = _mapping_get_or_use(singleton_storage.aleo::vec__, 3u32, 0u8);
+                let x = $ternary_branch$5;
+                assert(x != none);
+            } else {
+                let $ternary_branch$6: u8? = none;
+                let x = $ternary_branch$6;
+                assert(x != none);
+            }
         };
     }
     fn clear() -> Final<Fn()> {
@@ -36,43 +50,49 @@ program singleton_storage.aleo {
     }
     fn swap_remove() -> Final<Fn()> {
         return async {
-            let $len_var$3 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
-            assert(3u32 < $len_var$3);
-            let $removed$4 = _mapping_get(singleton_storage.aleo::vec__, 3u32);
-            _mapping_set(singleton_storage.aleo::vec__, 3u32, _mapping_get(singleton_storage.aleo::vec__, $len_var$3 - 1u32));
-            _mapping_set(singleton_storage.aleo::vec__len__, false, $len_var$3 - 1u32);
-            let x = $removed$4;
+            let $len_var$7 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
+            assert(3u32 < $len_var$7);
+            let $removed$8 = _mapping_get(singleton_storage.aleo::vec__, 3u32);
+            _mapping_set(singleton_storage.aleo::vec__, 3u32, _mapping_get(singleton_storage.aleo::vec__, $len_var$7 - 1u32));
+            _mapping_set(singleton_storage.aleo::vec__len__, false, $len_var$7 - 1u32);
+            let x = $removed$8;
             assert(x >= 0);
         };
     }
     fn set() -> Final<Fn()> {
         return async {
-            let $len_var$5 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
-            assert(3u32 < $len_var$5);
+            let $len_var$9 = _mapping_get_or_use(singleton_storage.aleo::vec__len__, false, 0u32);
+            assert(3u32 < $len_var$9);
             _mapping_set(singleton_storage.aleo::vec__, 3u32, 42u8);
         };
     }
     fn get_statement_fallible_index(public x: u32) -> Final<Fn()> {
         return async {
-            let $index$6 = 1u32 / x;
-            let $len_var$7 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
-            let $discard$8 = $index$6 < $len_var$7 ? _mapping_get_or_use(singleton_storage.aleo::nums__, $index$6, 0u32) : none;
+            let $index$10 = 1u32 / x;
+            let $len_var$11 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            if $index$10 < $len_var$11 {
+                let $ternary_branch$12: u32? = _mapping_get_or_use(singleton_storage.aleo::nums__, $index$10, 0u32);
+                let $discard$13 = $ternary_branch$12;
+            } else {
+                let $ternary_branch$14: u32? = none;
+                let $discard$15 = $ternary_branch$14;
+            }
         };
     }
     fn push_current_len() -> Final<Fn()> {
         return async {
-            let $push_value$9 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
-            let $len_var$10 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
-            _mapping_set(singleton_storage.aleo::nums__len__, false, $len_var$10 + 1u32);
-            _mapping_set(singleton_storage.aleo::nums__, $len_var$10, $push_value$9);
+            let $push_value$16 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            let $len_var$17 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            _mapping_set(singleton_storage.aleo::nums__len__, false, $len_var$17 + 1u32);
+            _mapping_set(singleton_storage.aleo::nums__, $len_var$17, $push_value$16);
         };
     }
     fn push_fallible_value(public x: u32) -> Final<Fn()> {
         return async {
-            let $push_value$11 = 1u32 / x;
-            let $len_var$12 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
-            _mapping_set(singleton_storage.aleo::nums__len__, false, $len_var$12 + 1u32);
-            _mapping_set(singleton_storage.aleo::nums__, $len_var$12, $push_value$11);
+            let $push_value$18 = 1u32 / x;
+            let $len_var$19 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            _mapping_set(singleton_storage.aleo::nums__len__, false, $len_var$19 + 1u32);
+            _mapping_set(singleton_storage.aleo::nums__, $len_var$19, $push_value$18);
         };
     }
 }
