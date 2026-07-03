@@ -894,7 +894,10 @@ impl StorageLoweringVisitor<'_> {
     fn statement_uses_local_symbol(&mut self, statement: &Statement, symbol: Symbol) -> bool {
         let mut collector = SymbolAccessCollector::new(self.state);
         collector.visit_statement(statement);
-        collector.symbol_accesses.iter().any(|(path, _)| path.is_local() && path.identifier().name == symbol)
+        collector.symbol_accesses.iter().any(|(path, _)| {
+            path.try_local_symbol().is_some_and(|local| local == symbol)
+                || (path.identifier().name == symbol && path.try_global_location().is_none())
+        })
     }
 
     fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
