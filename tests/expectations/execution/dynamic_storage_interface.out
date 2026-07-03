@@ -45,11 +45,17 @@ finalize check_counter:
     input r0 as field.public;
     input r1 as u64.public;
     contains.dynamic r0 'aleo' 'counter__'[false] into r2;
+    branch.eq r2 false to end_then_0_0;
     get.or_use.dynamic r0 'aleo' 'counter__'[false] 0u64 into r3 as u64;
-    ternary r2 r3 0u64 into r4;
-    cast r2 r4 into r5 as Optional__DmN5CQ9hzeK;
+    cast true r3 into r4 as Optional__DmN5CQ9hzeK;
+    assert.eq r4.is_some true;
+    assert.eq r4.val r1;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u64 into r5 as Optional__DmN5CQ9hzeK;
     assert.eq r5.is_some true;
     assert.eq r5.val r1;
+    position end_otherwise_0_1;
 
 function check_entry:
     input r0 as field.private;
@@ -64,11 +70,17 @@ finalize check_entry:
     input r2 as u64.public;
     get.or_use.dynamic r0 'aleo' 'entries__len__'[false] 0u32 into r3 as u32;
     lt r1 r3 into r4;
+    branch.eq r4 false to end_then_0_0;
     get.or_use.dynamic r0 'aleo' 'entries__'[r1] 0u64 into r5 as u64;
-    ternary r4 r5 0u64 into r6;
-    cast r4 r6 into r7 as Optional__DmN5CQ9hzeK;
+    cast true r5 into r6 as Optional__DmN5CQ9hzeK;
+    assert.eq r6.is_some true;
+    assert.eq r6.val r2;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u64 into r7 as Optional__DmN5CQ9hzeK;
     assert.eq r7.is_some true;
     assert.eq r7.val r2;
+    position end_otherwise_0_1;
 
 function check_entry_oob:
     input r0 as field.private;
@@ -81,12 +93,19 @@ finalize check_entry_oob:
     input r1 as u32.public;
     get.or_use.dynamic r0 'aleo' 'entries__len__'[false] 0u32 into r2 as u32;
     lt r1 r2 into r3;
+    branch.eq r3 false to end_then_0_0;
     get.or_use.dynamic r0 'aleo' 'entries__'[r1] 0u64 into r4 as u64;
-    ternary r3 r4 0u64 into r5;
-    cast r3 r5 into r6 as Optional__DmN5CQ9hzeK;
-    cast false 0u64 into r7 as Optional__DmN5CQ9hzeK;
-    is.eq r6 r7 into r8;
-    assert.eq r8 true;
+    cast true r4 into r5 as Optional__DmN5CQ9hzeK;
+    cast false 0u64 into r6 as Optional__DmN5CQ9hzeK;
+    is.eq r5 r6 into r7;
+    assert.eq r7 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u64 into r8 as Optional__DmN5CQ9hzeK;
+    cast false 0u64 into r9 as Optional__DmN5CQ9hzeK;
+    is.eq r8 r9 into r10;
+    assert.eq r10 true;
+    position end_otherwise_0_1;
 
 function check_len:
     input r0 as field.private;

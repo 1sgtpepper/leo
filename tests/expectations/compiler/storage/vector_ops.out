@@ -36,12 +36,19 @@ finalize pop:
     sub.w r0 1u32 into r2;
     ternary r1 r2 r0 into r3;
     set r3 into vec__len__[false];
+    branch.eq r1 false to end_then_0_0;
     get.or_use vec__[r2] 0u8 into r4;
-    ternary r1 r4 0u8 into r5;
-    cast r1 r5 into r6 as Optional__3aph2JMPtnA;
-    cast false 0u8 into r7 as Optional__3aph2JMPtnA;
-    is.neq r6 r7 into r8;
-    assert.eq r8 true;
+    cast true r4 into r5 as Optional__3aph2JMPtnA;
+    cast false 0u8 into r6 as Optional__3aph2JMPtnA;
+    is.neq r5 r6 into r7;
+    assert.eq r7 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u8 into r8 as Optional__3aph2JMPtnA;
+    cast false 0u8 into r9 as Optional__3aph2JMPtnA;
+    is.neq r8 r9 into r10;
+    assert.eq r10 true;
+    position end_otherwise_0_1;
 
 function get:
     async get into r0;
@@ -50,12 +57,19 @@ function get:
 finalize get:
     get.or_use vec__len__[false] 0u32 into r0;
     lt 3u32 r0 into r1;
+    branch.eq r1 false to end_then_0_0;
     get.or_use vec__[3u32] 0u8 into r2;
-    ternary r1 r2 0u8 into r3;
-    cast r1 r3 into r4 as Optional__3aph2JMPtnA;
-    cast false 0u8 into r5 as Optional__3aph2JMPtnA;
-    is.neq r4 r5 into r6;
-    assert.eq r6 true;
+    cast true r2 into r3 as Optional__3aph2JMPtnA;
+    cast false 0u8 into r4 as Optional__3aph2JMPtnA;
+    is.neq r3 r4 into r5;
+    assert.eq r5 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u8 into r6 as Optional__3aph2JMPtnA;
+    cast false 0u8 into r7 as Optional__3aph2JMPtnA;
+    is.neq r6 r7 into r8;
+    assert.eq r8 true;
+    position end_otherwise_0_1;
 
 function set:
     async set into r0;

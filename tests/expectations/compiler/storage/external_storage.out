@@ -286,12 +286,19 @@ finalize check_initialized:
     assert.eq r93 true;
     get.or_use child.aleo/vec__len__[false] 0u32 into r94;
     lt 2u32 r94 into r95;
+    branch.eq r95 false to end_then_0_0;
     get.or_use child.aleo/vec__[2u32] 0u8 into r96;
-    ternary r95 r96 0u8 into r97;
-    cast r95 r97 into r98 as Optional__3aph2JMPtnA;
-    assert.eq r98.is_some true;
-    is.eq r98.val 70u8 into r99;
-    assert.eq r99 true;
+    cast true r96 into r97 as Optional__3aph2JMPtnA;
+    assert.eq r97.is_some true;
+    is.eq r97.val 70u8 into r98;
+    assert.eq r98 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u8 into r99 as Optional__3aph2JMPtnA;
+    assert.eq r99.is_some true;
+    is.eq r99.val 70u8 into r100;
+    assert.eq r100 true;
+    position end_otherwise_0_1;
 
 function check_wiped:
     async check_wiped into r0;
