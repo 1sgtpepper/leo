@@ -350,7 +350,11 @@ impl StorageLoweringVisitor<'_> {
                 Self::expression_may_emit_cps_statements(&input.expr)
                     || Self::expression_may_emit_cps_statements(&input.count)
             }
-            Expression::Ternary(_) => true,
+            Expression::Ternary(input) => {
+                Self::expression_may_emit_cps_statements(&input.condition)
+                    || Self::expression_may_emit_cps_statements(&input.if_true)
+                    || Self::expression_may_emit_cps_statements(&input.if_false)
+            }
             Expression::Tuple(input) => input.elements.iter().any(Self::expression_may_emit_cps_statements),
             Expression::TupleAccess(input) => Self::expression_may_emit_cps_statements(&input.tuple),
             Expression::Unary(input) => Self::expression_may_emit_cps_statements(&input.receiver),
@@ -408,7 +412,22 @@ impl StorageLoweringVisitor<'_> {
         input: TernaryExpression,
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
-        let TernaryExpression { condition, if_true, if_false, span, .. } = input;
+        let TernaryExpression { condition, if_true, if_false, span, id } = input;
+        let true_arm_may_emit = Self::expression_may_emit_cps_statements(&if_true);
+        let false_arm_may_emit = Self::expression_may_emit_cps_statements(&if_false);
+        if !true_arm_may_emit && !false_arm_may_emit {
+            return self.emit_expression_with_continuation(
+                condition,
+                Rc::new(move |condition, this| {
+                    let (if_true, true_statements) = this.reconstruct_expression(if_true.clone(), &());
+                    let (if_false, false_statements) = this.reconstruct_expression(if_false.clone(), &());
+                    debug_assert!(true_statements.is_empty(), "pure ternary true arm emitted statements");
+                    debug_assert!(false_statements.is_empty(), "pure ternary false arm emitted statements");
+                    continuation.clone()(TernaryExpression { condition, if_true, if_false, span, id }.into(), this)
+                }),
+            );
+        }
+
         self.emit_expression_with_continuation(
             condition,
             Rc::new(move |condition, this| {
@@ -646,13 +665,96 @@ impl StorageLoweringVisitor<'_> {
         }
     }
 
+    fn expression_requires_branch_cps(expression: &Expression) -> bool {
+        match expression {
+            Expression::Array(input) => input.elements.iter().any(Self::expression_requires_branch_cps),
+            Expression::ArrayAccess(input) => {
+                Self::expression_requires_branch_cps(&input.array) || Self::expression_requires_branch_cps(&input.index)
+            }
+            Expression::Binary(input) => {
+                Self::expression_requires_branch_cps(&input.left) || Self::expression_requires_branch_cps(&input.right)
+            }
+            Expression::Call(input) => {
+                input.const_arguments.iter().any(Self::expression_requires_branch_cps)
+                    || input.arguments.iter().any(Self::expression_requires_branch_cps)
+            }
+            Expression::Cast(input) => Self::expression_requires_branch_cps(&input.expression),
+            Expression::Composite(input) => {
+                input.const_arguments.iter().any(Self::expression_requires_branch_cps)
+                    || input
+                        .members
+                        .iter()
+                        .filter_map(|member| member.expression.as_ref())
+                        .any(Self::expression_requires_branch_cps)
+                    || input.base.as_deref().is_some_and(Self::expression_requires_branch_cps)
+            }
+            Expression::DynamicOp(input) => {
+                Self::expression_requires_branch_cps(&input.target_program)
+                    || input.network.as_ref().is_some_and(Self::expression_requires_branch_cps)
+                    || match &input.kind {
+                        DynamicOpKind::Read { .. } => false,
+                        DynamicOpKind::Op { arguments, .. } | DynamicOpKind::Call { arguments, .. } => {
+                            arguments.iter().any(Self::expression_requires_branch_cps)
+                        }
+                    }
+            }
+            Expression::Intrinsic(input) => input.arguments.iter().any(Self::expression_requires_branch_cps),
+            Expression::MemberAccess(input) => Self::expression_requires_branch_cps(&input.inner),
+            Expression::Repeat(input) => {
+                Self::expression_requires_branch_cps(&input.expr) || Self::expression_requires_branch_cps(&input.count)
+            }
+            Expression::Ternary(input) => {
+                Self::expression_requires_branch_cps(&input.condition)
+                    || Self::expression_may_emit_cps_statements(&input.if_true)
+                    || Self::expression_may_emit_cps_statements(&input.if_false)
+            }
+            Expression::Tuple(input) => input.elements.iter().any(Self::expression_requires_branch_cps),
+            Expression::TupleAccess(input) => Self::expression_requires_branch_cps(&input.tuple),
+            Expression::Unary(input) => Self::expression_requires_branch_cps(&input.receiver),
+            _ => false,
+        }
+    }
+
+    fn statement_requires_tail_cps(statement: &Statement) -> bool {
+        match statement {
+            Statement::Assert(input) => match &input.variant {
+                AssertVariant::Assert(expression) => Self::expression_requires_branch_cps(expression),
+                AssertVariant::AssertEq(left, right) | AssertVariant::AssertNeq(left, right) => {
+                    Self::expression_requires_branch_cps(left) || Self::expression_requires_branch_cps(right)
+                }
+            },
+            Statement::Assign(input) => {
+                Self::expression_requires_branch_cps(&input.place) || Self::expression_requires_branch_cps(&input.value)
+            }
+            Statement::Block(_) => false,
+            Statement::Conditional(input) => Self::expression_requires_branch_cps(&input.condition),
+            Statement::Const(input) => Self::expression_requires_branch_cps(&input.value),
+            Statement::Definition(input) => Self::expression_requires_branch_cps(&input.value),
+            Statement::Expression(input) => Self::expression_requires_branch_cps(&input.expression),
+            Statement::Iteration(input) => {
+                Self::expression_requires_branch_cps(&input.start) || Self::expression_requires_branch_cps(&input.stop)
+            }
+            Statement::Return(input) => Self::expression_requires_branch_cps(&input.expression),
+        }
+    }
+
     fn reconstruct_block_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
-        let mut statement_iter = statements.into_iter();
-        let Some(statement) = statement_iter.next() else {
-            return Vec::new();
-        };
-        let tail = statement_iter.collect::<Vec<_>>();
-        self.reconstruct_statement_with_tail(statement, &tail)
+        let mut remaining = std::collections::VecDeque::from(statements);
+        let mut reconstructed = Vec::new();
+
+        while let Some(statement) = remaining.pop_front() {
+            if Self::statement_requires_tail_cps(&statement) {
+                let tail = remaining.into_iter().collect::<Vec<_>>();
+                reconstructed.extend(self.reconstruct_statement_with_tail(statement, &tail));
+                return reconstructed;
+            }
+
+            let (statement, additional_statements) = self.reconstruct_statement(statement);
+            reconstructed.extend(additional_statements);
+            reconstructed.push(statement);
+        }
+
+        reconstructed
     }
 
     fn reconstruct_statement_with_tail(&mut self, statement: Statement, tail: &[Statement]) -> Vec<Statement> {
