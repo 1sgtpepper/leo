@@ -55,7 +55,7 @@ impl StorageLoweringVisitor<'_> {
     /// contexts materialize non-discardable values before lowering the next sibling, while
     /// ternary branches keep branch-produced effects inside the branch that selected them. When
     /// a branch-local definition is used by following statements, statement lowering replays only
-    /// the tail slice that still references that local and rejoins after the last use.
+    /// the tail prefix that still depends on branch-local values and rejoins after that prefix.
     fn emit_expression_with_continuation(
         &mut self,
         expression: Expression,
@@ -881,23 +881,73 @@ impl StorageLoweringVisitor<'_> {
         tail: &[Statement],
         symbol: Symbol,
     ) -> (Vec<Statement>, Vec<Statement>) {
+        let mut branch_symbols = vec![symbol];
         let mut split_index = 0;
         for (index, statement) in tail.iter().enumerate() {
-            if self.statement_uses_local_symbol(statement, symbol) {
+            if self.statement_uses_any_local_symbol(statement, &branch_symbols) {
+                let old_split_index = split_index;
                 split_index = index + 1;
+                tail[old_split_index..split_index]
+                    .iter()
+                    .for_each(|statement| Self::extend_branch_local_symbols(statement, &mut branch_symbols));
             }
         }
 
         (tail[..split_index].to_vec(), tail[split_index..].to_vec())
     }
 
-    fn statement_uses_local_symbol(&mut self, statement: &Statement, symbol: Symbol) -> bool {
+    fn statement_uses_any_local_symbol(&mut self, statement: &Statement, symbols: &[Symbol]) -> bool {
         let mut collector = SymbolAccessCollector::new(self.state);
         collector.visit_statement(statement);
-        collector.symbol_accesses.iter().any(|(path, _)| {
-            path.try_local_symbol().is_some_and(|local| local == symbol)
-                || (path.identifier().name == symbol && path.try_global_location().is_none())
-        })
+        collector
+            .symbol_accesses
+            .iter()
+            .any(|(path, _)| symbols.iter().any(|symbol| Self::path_matches_local_symbol(path, *symbol)))
+    }
+
+    fn path_matches_local_symbol(path: &Path, symbol: Symbol) -> bool {
+        path.try_local_symbol().is_some_and(|local| local == symbol)
+            || (path.identifier().name == symbol
+                && path.try_global_location().is_none()
+                && path.qualifier().is_empty()
+                && path.program().is_none())
+    }
+
+    fn extend_branch_local_symbols(statement: &Statement, symbols: &mut Vec<Symbol>) {
+        match statement {
+            Statement::Assign(input) => {
+                if let Some(symbol) = Self::assigned_local_symbol(&input.place) {
+                    Self::push_branch_local_symbol(symbols, symbol);
+                }
+            }
+            Statement::Const(input) => Self::push_branch_local_symbol(symbols, input.place.name),
+            Statement::Definition(input) => match &input.place {
+                DefinitionPlace::Single(identifier) => Self::push_branch_local_symbol(symbols, identifier.name),
+                DefinitionPlace::Multiple(identifiers) => {
+                    identifiers.iter().for_each(|identifier| Self::push_branch_local_symbol(symbols, identifier.name));
+                }
+            },
+            _ => {}
+        }
+    }
+
+    fn assigned_local_symbol(expression: &Expression) -> Option<Symbol> {
+        match expression {
+            Expression::ArrayAccess(input) => Self::assigned_local_symbol(&input.array),
+            Expression::MemberAccess(input) => Self::assigned_local_symbol(&input.inner),
+            Expression::Path(path) => path.try_local_symbol().or_else(|| {
+                (path.try_global_location().is_none() && path.qualifier().is_empty() && path.program().is_none())
+                    .then_some(path.identifier().name)
+            }),
+            Expression::TupleAccess(input) => Self::assigned_local_symbol(&input.tuple),
+            _ => None,
+        }
+    }
+
+    fn push_branch_local_symbol(symbols: &mut Vec<Symbol>, symbol: Symbol) {
+        if !symbols.contains(&symbol) {
+            symbols.push(symbol);
+        }
     }
 
     fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
