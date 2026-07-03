@@ -29,6 +29,92 @@ pub struct StorageLoweringVisitor<'a> {
 }
 
 impl StorageLoweringVisitor<'_> {
+    pub(super) fn expression_type_for_materialization(&self, expression: &Expression) -> Option<Type> {
+        if let Some(type_) = self.state.type_table.get(&expression.id()) {
+            return Some(type_);
+        }
+
+        match expression {
+            Expression::Binary(input) => {
+                use BinaryOperation::*;
+                match input.op {
+                    And | Eq | Gte | Gt | Lte | Lt | Nand | Neq | Nor | Or => Some(Type::Boolean),
+                    _ => self
+                        .expression_type_for_materialization(&input.left)
+                        .or_else(|| self.expression_type_for_materialization(&input.right)),
+                }
+            }
+            Expression::Intrinsic(input) => match Intrinsic::from_symbol(input.name, &input.type_parameters) {
+                Some(Intrinsic::MappingGet) => self.mapping_value_type(input.arguments.first()?),
+                Some(Intrinsic::MappingGetOrUse) => self
+                    .mapping_value_type(input.arguments.first()?)
+                    .or_else(|| self.expression_type_for_materialization(input.arguments.get(2)?)),
+                Some(Intrinsic::MappingContains) | Some(Intrinsic::DynamicContains) => Some(Type::Boolean),
+                Some(Intrinsic::MappingSet) | Some(Intrinsic::MappingRemove) => Some(Type::Unit),
+                Some(Intrinsic::DynamicGet) | Some(Intrinsic::DynamicGetOrUse) => {
+                    input.type_parameters.first().map(|(type_, _)| type_.clone())
+                }
+                _ => None,
+            },
+            Expression::Literal(input) => match &input.variant {
+                LiteralVariant::Address(_) => Some(Type::Address),
+                LiteralVariant::Boolean(_) => Some(Type::Boolean),
+                LiteralVariant::Field(_) => Some(Type::Field),
+                LiteralVariant::Group(_) => Some(Type::Group),
+                LiteralVariant::Identifier(_) => Some(Type::Identifier),
+                LiteralVariant::Integer(integer_type, _) => Some(Type::Integer(*integer_type)),
+                LiteralVariant::None => None,
+                LiteralVariant::Scalar(_) => Some(Type::Scalar),
+                LiteralVariant::Signature(_) => Some(Type::Signature),
+                LiteralVariant::String(_) => Some(Type::String),
+                LiteralVariant::Unsuffixed(_) => Some(Type::Integer(IntegerType::U32)),
+            },
+            Expression::Path(input) => self.path_type(input),
+            Expression::Ternary(input) => match (
+                self.expression_type_for_materialization(&input.if_true),
+                self.expression_type_for_materialization(&input.if_false),
+                input.if_true.is_none_expr(),
+                input.if_false.is_none_expr(),
+            ) {
+                (Some(type_), _, _, true) | (_, Some(type_), true, _) => {
+                    Some(Type::Optional(OptionalType { inner: Box::new(type_) }))
+                }
+                (Some(type_), _, _, _) => Some(type_),
+                (_, Some(type_), _, _) => Some(type_),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn path_type(&self, path: &Path) -> Option<Type> {
+        self.state.type_table.get(&path.id()).or_else(|| {
+            path.try_global_location().and_then(|location| {
+                self.new_mappings
+                    .get(location)
+                    .map(|mapping| {
+                        Type::Mapping(MappingType {
+                            key: Box::new(mapping.key_type.clone()),
+                            value: Box::new(mapping.value_type.clone()),
+                        })
+                    })
+                    .or_else(|| {
+                        self.state
+                            .symbol_table
+                            .lookup_global(self.program, location)
+                            .and_then(|symbol| symbol.type_.clone())
+                    })
+            })
+        })
+    }
+
+    fn mapping_value_type(&self, expression: &Expression) -> Option<Type> {
+        match self.expression_type_for_materialization(expression)? {
+            Type::Mapping(mapping) => Some(*mapping.value),
+            _ => None,
+        }
+    }
+
     /// Returns the two mapping expressions that back a vector: `<base>__` (values)
     /// and `<base>__len__` (length).
     ///
@@ -37,6 +123,10 @@ impl StorageLoweringVisitor<'_> {
         let base = path.identifier().name;
         let val = Symbol::intern(&format!("{base}__"));
         let len = Symbol::intern(&format!("{base}__len__"));
+        let element_type = match self.path_type(path) {
+            Some(Type::Vector(VectorType { element_type })) => *element_type,
+            _ => Type::Err,
+        };
 
         let make_expr = |sym| {
             let ident = Identifier::new(sym, self.state.node_builder.next_id());
@@ -49,23 +139,56 @@ impl StorageLoweringVisitor<'_> {
             p.to_global(Location::new(self.program, vec![sym])).into()
         };
 
-        (make_expr(val), make_expr(len))
+        let value_mapping: Expression = make_expr(val);
+        self.state.type_table.insert(
+            value_mapping.id(),
+            Type::Mapping(MappingType {
+                key: Box::new(Type::Integer(IntegerType::U32)),
+                value: Box::new(element_type),
+            }),
+        );
+
+        let len_mapping: Expression = make_expr(len);
+        self.state.type_table.insert(
+            len_mapping.id(),
+            Type::Mapping(MappingType {
+                key: Box::new(Type::Boolean),
+                value: Box::new(Type::Integer(IntegerType::U32)),
+            }),
+        );
+
+        (value_mapping, len_mapping)
     }
 
     pub fn literal_false(&mut self) -> Expression {
-        Literal::boolean(false, Span::default(), self.state.node_builder.next_id()).into()
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Boolean);
+        Literal::boolean(false, Span::default(), id).into()
+    }
+
+    pub fn literal_none_optional(&mut self, inner_type: Type) -> Expression {
+        let optional_type = Type::Optional(OptionalType { inner: Box::new(inner_type) });
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, optional_type);
+        Literal::none(Span::default(), id).into()
     }
 
     pub fn literal_zero_u32(&mut self) -> Expression {
-        Literal::integer(IntegerType::U32, "0".to_string(), Span::default(), self.state.node_builder.next_id()).into()
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Integer(IntegerType::U32));
+        Literal::integer(IntegerType::U32, "0".to_string(), Span::default(), id).into()
     }
 
     pub fn literal_one_u32(&mut self) -> Expression {
-        Literal::integer(IntegerType::U32, "1".to_string(), Span::default(), self.state.node_builder.next_id()).into()
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Integer(IntegerType::U32));
+        Literal::integer(IntegerType::U32, "1".to_string(), Span::default(), id).into()
     }
 
     /// Generates `_mapping_get_or_use(len_path_expr, false, 0u32)`
     pub fn get_vector_len_expr(&mut self, len_path_expr: Expression, span: Span) -> Expression {
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Integer(IntegerType::U32));
         IntrinsicExpression {
             name: sym::_mapping_get_or_use,
             type_parameters: vec![],
@@ -73,7 +196,7 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![len_path_expr, self.literal_false(), self.literal_zero_u32()],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
@@ -86,6 +209,8 @@ impl StorageLoweringVisitor<'_> {
         value_expr: Expression,
         span: Span,
     ) -> Expression {
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Unit);
         IntrinsicExpression {
             name: sym::_mapping_set,
             type_parameters: vec![],
@@ -93,13 +218,17 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![path_expr, key_expr, value_expr],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
 
     /// Generates `_mapping_get(path_expr, key_expr)`
     pub fn get_mapping_expr(&mut self, path_expr: Expression, key_expr: Expression, span: Span) -> Expression {
+        let id = self.state.node_builder.next_id();
+        if let Some(type_) = self.mapping_value_type(&path_expr) {
+            self.state.type_table.insert(id, type_);
+        }
         IntrinsicExpression {
             name: sym::_mapping_get,
             type_parameters: vec![],
@@ -107,7 +236,7 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![path_expr, key_expr],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
@@ -120,6 +249,12 @@ impl StorageLoweringVisitor<'_> {
         default_expr: Expression,
         span: Span,
     ) -> Expression {
+        let id = self.state.node_builder.next_id();
+        if let Some(type_) =
+            self.mapping_value_type(&path_expr).or_else(|| self.expression_type_for_materialization(&default_expr))
+        {
+            self.state.type_table.insert(id, type_);
+        }
         IntrinsicExpression {
             name: sym::_mapping_get_or_use,
             type_parameters: vec![],
@@ -127,7 +262,7 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![path_expr, key_expr, default_expr],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
@@ -139,17 +274,38 @@ impl StorageLoweringVisitor<'_> {
         if_false: Expression,
         span: Span,
     ) -> Expression {
-        TernaryExpression { condition, if_true, if_false, span, id: self.state.node_builder.next_id() }.into()
+        let id = self.state.node_builder.next_id();
+        let type_ = match (
+            self.expression_type_for_materialization(&if_true),
+            self.expression_type_for_materialization(&if_false),
+            if_true.is_none_expr(),
+            if_false.is_none_expr(),
+        ) {
+            (Some(type_), _, _, true) | (_, Some(type_), true, _) => {
+                Some(Type::Optional(OptionalType { inner: Box::new(type_) }))
+            }
+            (Some(type_), _, _, _) => Some(type_),
+            (_, Some(type_), _, _) => Some(type_),
+            _ => None,
+        };
+        if let Some(type_) = type_ {
+            self.state.type_table.insert(id, type_);
+        }
+        TernaryExpression { condition, if_true, if_false, span, id }.into()
     }
 
     /// Emits an identifier literal expression (e.g. `'x__'`).
     pub fn literal_identifier(&mut self, name: Symbol) -> Expression {
-        Literal::identifier(name.to_string(), Span::default(), self.state.node_builder.next_id()).into()
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Identifier);
+        Literal::identifier(name.to_string(), Span::default(), id).into()
     }
 
     /// Emits the default network literal `'aleo'`.
     pub fn literal_default_network(&mut self) -> Expression {
-        Literal::identifier("aleo".to_string(), Span::default(), self.state.node_builder.next_id()).into()
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Identifier);
+        Literal::identifier("aleo".to_string(), Span::default(), id).into()
     }
 
     /// Emits `_dynamic_contains(prog, net, mapping, key)`.
@@ -161,6 +317,8 @@ impl StorageLoweringVisitor<'_> {
         key: Expression,
         span: Span,
     ) -> Expression {
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, Type::Boolean);
         IntrinsicExpression {
             name: sym::_dynamic_contains,
             type_parameters: vec![],
@@ -168,7 +326,7 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![prog, net, mapping, key],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
@@ -185,6 +343,8 @@ impl StorageLoweringVisitor<'_> {
         value_ty: Type,
         span: Span,
     ) -> Expression {
+        let id = self.state.node_builder.next_id();
+        self.state.type_table.insert(id, value_ty.clone());
         IntrinsicExpression {
             name: sym::_dynamic_get_or_use,
             type_parameters: vec![(value_ty, span)],
@@ -192,7 +352,7 @@ impl StorageLoweringVisitor<'_> {
             return_types: vec![],
             arguments: vec![prog, net, mapping, key, default],
             span,
-            id: self.state.node_builder.next_id(),
+            id,
         }
         .into()
     }
@@ -211,7 +371,26 @@ impl StorageLoweringVisitor<'_> {
     }
 
     pub fn binary_expr(&mut self, left: Expression, op: BinaryOperation, right: Expression) -> Expression {
-        BinaryExpression { op, left, right, span: Span::default(), id: self.state.node_builder.next_id() }.into()
+        let id = self.state.node_builder.next_id();
+        let type_ = match op {
+            BinaryOperation::And
+            | BinaryOperation::Eq
+            | BinaryOperation::Gte
+            | BinaryOperation::Gt
+            | BinaryOperation::Lte
+            | BinaryOperation::Lt
+            | BinaryOperation::Nand
+            | BinaryOperation::Neq
+            | BinaryOperation::Nor
+            | BinaryOperation::Or => Some(Type::Boolean),
+            _ => self
+                .expression_type_for_materialization(&left)
+                .or_else(|| self.expression_type_for_materialization(&right)),
+        };
+        if let Some(type_) = type_ {
+            self.state.type_table.insert(id, type_);
+        }
+        BinaryExpression { op, left, right, span: Span::default(), id }.into()
     }
 
     /// Lowers `Interface@(target)::storage` (singleton bare read) to a ternary
@@ -253,10 +432,16 @@ impl StorageLoweringVisitor<'_> {
             self.dynamic_contains_expr(prog_expr.clone(), net_expr.clone(), mapping_lit_a, false_lit_a, span);
 
         let zero = self.zero(&inner_type);
-        let get_or_use_expr =
-            self.dynamic_get_or_use_expr(prog_expr, net_expr, mapping_lit_b, false_lit_b, zero, inner_type, span);
-
-        let none_expr: Expression = Literal::none(Span::default(), self.state.node_builder.next_id()).into();
+        let get_or_use_expr = self.dynamic_get_or_use_expr(
+            prog_expr,
+            net_expr,
+            mapping_lit_b,
+            false_lit_b,
+            zero,
+            inner_type.clone(),
+            span,
+        );
+        let none_expr = self.literal_none_optional(inner_type);
         let ternary = self.ternary_expr(contains_expr, get_or_use_expr, none_expr, span);
 
         let mut stmts = prog_stmts;
@@ -331,10 +516,16 @@ impl StorageLoweringVisitor<'_> {
 
         let val_mapping_lit = self.literal_identifier(val_mapping_sym);
         let zero = self.zero(&element_type);
-        let get_or_use_expr =
-            self.dynamic_get_or_use_expr(prog_expr, net_expr, val_mapping_lit, index_expr, zero, element_type, span);
-
-        let none_expr: Expression = Literal::none(Span::default(), self.state.node_builder.next_id()).into();
+        let get_or_use_expr = self.dynamic_get_or_use_expr(
+            prog_expr,
+            net_expr,
+            val_mapping_lit,
+            index_expr,
+            zero,
+            element_type.clone(),
+            span,
+        );
+        let none_expr = self.literal_none_optional(element_type);
         let ternary = self.ternary_expr(index_lt_len_expr, get_or_use_expr, none_expr, span);
 
         let mut stmts = prog_stmts;
@@ -396,11 +587,11 @@ impl StorageLoweringVisitor<'_> {
             .expect("zero value generation failed")
     }
 
-    pub fn reconstruct_path_or_locator(&self, input: Expression) -> Expression {
+    pub fn reconstruct_path_or_locator(&mut self, input: Expression) -> (Expression, Vec<Statement>) {
         let location = match input {
             Expression::Path(ref path) if path.is_local() => {
                 // nothing to do for local paths.
-                return input;
+                return (input, vec![]);
             }
             Expression::Path(ref path) => {
                 // Otherwise, it should be a global path.
@@ -412,13 +603,14 @@ impl StorageLoweringVisitor<'_> {
         // Check if this path corresponds to a global symbol.
         let Some(var) = self.state.symbol_table.lookup_global(self.program, &location) else {
             // Nothing to do
-            return input;
+            return (input, vec![]);
         };
+        let var_type = var.type_.clone();
 
-        match &var.type_ {
+        match var_type {
             Some(Type::Mapping(_)) => {
                 // No transformation needed for mappings.
-                input
+                (input, vec![])
             }
 
             Some(Type::Optional(OptionalType { inner })) => {
@@ -433,12 +625,11 @@ impl StorageLoweringVisitor<'_> {
                 //      ? x__.get_or_use(false, 0field)
                 //      : None;
 
-                let id = || self.state.node_builder.next_id();
                 let var_name = location.path.last().unwrap();
 
                 // Path to the mapping backing the optional variable: `<var_name>__`
                 let mapping_symbol = Symbol::intern(&format!("{var_name}__"));
-                let mapping_ident = Identifier::new(mapping_symbol, id());
+                let mapping_ident = Identifier::new(mapping_symbol, self.state.node_builder.next_id());
 
                 // === Build expressions ===
                 let mapping_expr: Expression = {
@@ -459,10 +650,16 @@ impl StorageLoweringVisitor<'_> {
 
                     base_path.to_global(Location::new(self.program, vec![mapping_ident.name])).into()
                 };
+                self.state.type_table.insert(
+                    mapping_expr.id(),
+                    Type::Mapping(MappingType { key: Box::new(Type::Boolean), value: inner.clone() }),
+                );
 
-                let false_literal: Expression = Literal::boolean(false, Span::default(), id()).into();
+                let false_literal = self.literal_false();
 
                 // `<var_name>__.contains(false)`
+                let contains_id = self.state.node_builder.next_id();
+                self.state.type_table.insert(contains_id, Type::Boolean);
                 let contains_expr: Expression = IntrinsicExpression {
                     name: sym::_mapping_contains,
                     type_parameters: vec![],
@@ -470,45 +667,23 @@ impl StorageLoweringVisitor<'_> {
                     return_types: vec![],
                     arguments: vec![mapping_expr.clone(), false_literal.clone()],
                     span: Span::default(),
-                    id: id(),
+                    id: contains_id,
                 }
                 .into();
 
                 // zero value for element type
-                let zero = self.zero(inner);
+                let zero = self.zero(&inner);
 
                 // `<var_name>__.get_or_use(false, zero_value)`
-                let get_or_use_expr: Expression = IntrinsicExpression {
-                    name: sym::_mapping_get_or_use,
-                    type_parameters: vec![],
-                    input_types: vec![],
-                    return_types: vec![],
-                    arguments: vec![mapping_expr.clone(), false_literal, zero],
-                    span: Span::default(),
-                    id: id(),
-                }
-                .into();
+                let get_or_use_expr =
+                    self.get_or_use_mapping_expr(mapping_expr.clone(), false_literal, zero, Span::default());
+                let none_expr = self.literal_none_optional(*inner.clone());
 
-                // `None`
-                let none_expr =
-                    Expression::Literal(Literal { variant: LiteralVariant::None, span: Span::default(), id: id() });
-
-                // Combine into ternary:
-                // `<var_name>__.contains(false) ? <var_name>__.get_or_use(false, zero_val) : None`
-                let ternary_expr: Expression = TernaryExpression {
-                    condition: contains_expr,
-                    if_true: get_or_use_expr,
-                    if_false: none_expr,
-                    span: Span::default(),
-                    id: id(),
-                }
-                .into();
-
-                ternary_expr
+                (self.ternary_expr(contains_expr, get_or_use_expr, none_expr, Span::default()), vec![])
             }
 
             _ => {
-                panic!("Expected an optional or a mapping, found {:?}", var.type_);
+                panic!("Expected an optional or a mapping, found {:?}", var_type);
             }
         }
     }

@@ -242,7 +242,11 @@ impl StorageLoweringVisitor<'_> {
         let source_id = expression.id();
         let (expression, mut statements) = self.reconstruct_expression(expression, &());
         self.copy_expression_type(source_id, expression.id());
-        statements.extend(continuation(expression, self));
+        if Self::expression_requires_branch_cps(&expression) {
+            statements.extend(self.emit_expression_with_continuation(expression, continuation));
+        } else {
+            statements.extend(continuation(expression, self));
+        }
         statements
     }
 
@@ -254,7 +258,11 @@ impl StorageLoweringVisitor<'_> {
         let source_id = input.id;
         let (expression, mut statements) = self.reconstruct_call(input, &());
         self.copy_expression_type(source_id, expression.id());
-        statements.extend(continuation(expression, self));
+        if Self::expression_requires_branch_cps(&expression) {
+            statements.extend(self.emit_expression_with_continuation(expression, continuation));
+        } else {
+            statements.extend(continuation(expression, self));
+        }
         statements
     }
 
@@ -266,7 +274,11 @@ impl StorageLoweringVisitor<'_> {
         let source_id = input.id;
         let (expression, mut statements) = self.reconstruct_dynamic_op(input, &());
         self.copy_expression_type(source_id, expression.id());
-        statements.extend(continuation(expression, self));
+        if !matches!(expression, Expression::DynamicOp(_)) && Self::expression_requires_branch_cps(&expression) {
+            statements.extend(self.emit_expression_with_continuation(expression, continuation));
+        } else {
+            statements.extend(continuation(expression, self));
+        }
         statements
     }
 
@@ -278,7 +290,11 @@ impl StorageLoweringVisitor<'_> {
         let source_id = input.id;
         let (expression, mut statements) = self.reconstruct_intrinsic(input, &());
         self.copy_expression_type(source_id, expression.id());
-        statements.extend(continuation(expression, self));
+        if Self::expression_requires_branch_cps(&expression) {
+            statements.extend(self.emit_expression_with_continuation(expression, continuation));
+        } else {
+            statements.extend(continuation(expression, self));
+        }
         statements
     }
 
@@ -292,10 +308,8 @@ impl StorageLoweringVisitor<'_> {
         }
 
         let type_ = self
-            .state
-            .type_table
-            .get(&expression.id())
-            .expect("type checking should assign a type before strict-prefix materialization");
+            .expression_type_for_materialization(&expression)
+            .expect("storage lowering should know the type before strict-prefix materialization");
 
         let temp_sym = self.state.assigner.unique_symbol("$eval", "$");
         let temp_ident = Identifier { name: temp_sym, span: Default::default(), id: self.state.node_builder.next_id() };
@@ -338,10 +352,19 @@ impl StorageLoweringVisitor<'_> {
                 matches!(
                     Intrinsic::from_symbol(input.name, &input.type_parameters),
                     Some(
-                        Intrinsic::VectorPush
+                        Intrinsic::MappingGet
+                            | Intrinsic::MappingGetOrUse
+                            | Intrinsic::MappingContains
+                            | Intrinsic::MappingSet
+                            | Intrinsic::MappingRemove
+                            | Intrinsic::DynamicGet
+                            | Intrinsic::DynamicGetOrUse
+                            | Intrinsic::DynamicContains
+                            | Intrinsic::VectorPush
                             | Intrinsic::VectorPop
                             | Intrinsic::VectorGet
                             | Intrinsic::VectorSet
+                            | Intrinsic::VectorLen
                             | Intrinsic::VectorClear
                             | Intrinsic::VectorSwapRemove
                     )
@@ -415,6 +438,10 @@ impl StorageLoweringVisitor<'_> {
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
         let TernaryExpression { condition, if_true, if_false, span, id } = input;
+        let optional_type = match self.state.type_table.get(&id) {
+            Some(Type::Optional(optional)) => Some(Type::Optional(optional)),
+            _ => None,
+        };
         let true_arm_may_emit = Self::expression_may_emit_cps_statements(&if_true);
         let false_arm_may_emit = Self::expression_may_emit_cps_statements(&if_false);
         if !true_arm_may_emit && !false_arm_may_emit {
@@ -433,8 +460,42 @@ impl StorageLoweringVisitor<'_> {
         self.emit_expression_with_continuation(
             condition,
             Rc::new(move |condition, this| {
-                let then_statements = this.emit_expression_with_continuation(if_true.clone(), continuation.clone());
-                let else_statements = this.emit_expression_with_continuation(if_false.clone(), continuation.clone());
+                let optional_type_for_true = optional_type.clone();
+                let optional_type_for_false = optional_type.clone();
+                let true_continuation = continuation.clone();
+                let false_continuation = continuation.clone();
+                let then_statements = this.emit_expression_with_continuation(
+                    if_true.clone(),
+                    Rc::new(move |if_true, this| {
+                        let mut statements = Vec::new();
+                        let if_true = if let Some(optional_type) = optional_type_for_true.clone() {
+                            let (if_true, branch_statements) =
+                                this.bind_optional_ternary_branch(if_true, optional_type, span);
+                            statements.extend(branch_statements);
+                            if_true
+                        } else {
+                            if_true
+                        };
+                        statements.extend(true_continuation.clone()(if_true, this));
+                        statements
+                    }),
+                );
+                let else_statements = this.emit_expression_with_continuation(
+                    if_false.clone(),
+                    Rc::new(move |if_false, this| {
+                        let mut statements = Vec::new();
+                        let if_false = if let Some(optional_type) = optional_type_for_false.clone() {
+                            let (if_false, branch_statements) =
+                                this.bind_optional_ternary_branch(if_false, optional_type, span);
+                            statements.extend(branch_statements);
+                            if_false
+                        } else {
+                            if_false
+                        };
+                        statements.extend(false_continuation.clone()(if_false, this));
+                        statements
+                    }),
+                );
 
                 vec![
                     ConditionalStatement {
@@ -450,6 +511,29 @@ impl StorageLoweringVisitor<'_> {
                 ]
             }),
         )
+    }
+
+    fn bind_optional_ternary_branch(
+        &mut self,
+        expression: Expression,
+        optional_type: Type,
+        span: Span,
+    ) -> (Expression, Vec<Statement>) {
+        let temp_sym = self.state.assigner.unique_symbol("$ternary_branch", "$");
+        let temp_ident = Identifier { name: temp_sym, span: Default::default(), id: self.state.node_builder.next_id() };
+        self.state.type_table.insert(temp_ident.id, optional_type.clone());
+
+        let definition = DefinitionStatement {
+            place: DefinitionPlace::Single(temp_ident),
+            type_: Some(optional_type.clone()),
+            value: expression,
+            span,
+            id: self.state.node_builder.next_id(),
+        };
+
+        let path: Expression = Path::from(temp_ident).to_local().into();
+        self.state.type_table.insert(path.id(), optional_type);
+        (path, vec![definition.into()])
     }
 
     fn emit_intrinsic_with_continuation(
@@ -694,13 +778,19 @@ impl StorageLoweringVisitor<'_> {
                 Self::expression_requires_branch_cps(&input.target_program)
                     || input.network.as_ref().is_some_and(Self::expression_requires_branch_cps)
                     || match &input.kind {
-                        DynamicOpKind::Read { .. } => false,
-                        DynamicOpKind::Op { arguments, .. } | DynamicOpKind::Call { arguments, .. } => {
+                        DynamicOpKind::Read { .. } | DynamicOpKind::Op { .. } => true,
+                        DynamicOpKind::Call { arguments, .. } => {
                             arguments.iter().any(Self::expression_requires_branch_cps)
                         }
                     }
             }
-            Expression::Intrinsic(input) => input.arguments.iter().any(Self::expression_requires_branch_cps),
+            Expression::Intrinsic(input) => {
+                input.arguments.iter().any(Self::expression_requires_branch_cps)
+                    || matches!(
+                        Intrinsic::from_symbol(input.name, &input.type_parameters),
+                        Some(Intrinsic::VectorPop | Intrinsic::VectorGet)
+                    )
+            }
             Expression::MemberAccess(input) => Self::expression_requires_branch_cps(&input.inner),
             Expression::Repeat(input) => {
                 Self::expression_requires_branch_cps(&input.expr) || Self::expression_requires_branch_cps(&input.count)
@@ -1348,8 +1438,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                 let get_or_use_expr =
                     self.get_or_use_mapping_expr(vec_path_expr, len_minus_one_expr.clone(), zero, input.span);
 
-                // ternary: $len_var > 0 ? get(vec, len-1) : None
-                let none_expr: Expression = Literal::none(Span::default(), self.state.node_builder.next_id()).into();
+                let none_expr = self.literal_none_optional(*element_type.clone());
                 let ternary_expr = self.ternary_expr(len_gt_zero_expr, get_or_use_expr, none_expr, input.span);
 
                 (ternary_expr, vec![len_stmt, set_len_stmt])
@@ -1431,8 +1520,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                 let get_or_use_expr =
                     self.get_or_use_mapping_expr(vec_path_expr, reconstructed_key_expr.clone(), zero, input.span);
 
-                // ternary: index < len ? get(vec, index) : none
-                let none_expr: Expression = Literal::none(Span::default(), self.state.node_builder.next_id()).into();
+                let none_expr = self.literal_none_optional(*element_type.clone());
                 let ternary_expr = self.ternary_expr(index_lt_len_expr, get_or_use_expr, none_expr, input.span);
 
                 (ternary_expr, [key_stmts, vec![len_stmt]].concat())
@@ -1882,7 +1970,7 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
     }
 
     fn reconstruct_path(&mut self, input: Path, _additional: &()) -> (Expression, Self::AdditionalOutput) {
-        (self.reconstruct_path_or_locator(input.into()), vec![])
+        self.reconstruct_path_or_locator(input.into())
     }
 
     fn reconstruct_ternary(

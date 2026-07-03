@@ -1,0 +1,86 @@
+program test.aleo;
+
+mapping branch_map:
+    key as u32.public;
+    value as u32.public;
+
+mapping len_vec__:
+    key as u32.public;
+    value as u32.public;
+
+mapping len_vec__len__:
+    key as boolean.public;
+    value as u32.public;
+
+function mapping_get_unselected:
+    input r0 as boolean.public;
+    async mapping_get_unselected r0 into r1;
+    output r1 as test.aleo/mapping_get_unselected.future;
+
+finalize mapping_get_unselected:
+    input r0 as boolean.public;
+    branch.eq r0 false to end_then_0_0;
+    get branch_map[0u32] into r1;
+    is.eq r1 0u32 into r2;
+    assert.eq r2 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    position end_otherwise_0_1;
+
+function mapping_get_or_use_unselected:
+    input r0 as boolean.public;
+    async mapping_get_or_use_unselected r0 into r1;
+    output r1 as test.aleo/mapping_get_or_use_unselected.future;
+
+finalize mapping_get_or_use_unselected:
+    input r0 as boolean.public;
+    branch.eq r0 false to end_then_0_0;
+    get.or_use branch_map[0u32] 1u32 into r1;
+    is.eq r1 0u32 into r2;
+    assert.eq r2 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    position end_otherwise_0_1;
+
+function mapping_contains_unselected:
+    input r0 as boolean.public;
+    async mapping_contains_unselected r0 into r1;
+    output r1 as test.aleo/mapping_contains_unselected.future;
+
+finalize mapping_contains_unselected:
+    input r0 as boolean.public;
+    branch.eq r0 false to end_then_0_0;
+    contains branch_map[0u32] into r1;
+    not r1 into r2;
+    assert.eq r2 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    position end_otherwise_0_1;
+
+function vector_len_unselected:
+    input r0 as boolean.public;
+    async vector_len_unselected r0 into r1;
+    output r1 as test.aleo/vector_len_unselected.future;
+
+finalize vector_len_unselected:
+    input r0 as boolean.public;
+    get.or_use len_vec__len__[false] 0u32 into r1;
+    add r1 1u32 into r2;
+    set r2 into len_vec__len__[false];
+    set 11u32 into len_vec__[r1];
+    branch.eq r0 false to end_then_0_0;
+    get.or_use len_vec__len__[false] 0u32 into r3;
+    is.eq r3 0u32 into r4;
+    assert.eq r4 true;
+    get.or_use len_vec__len__[false] 0u32 into r5;
+    is.eq r5 1u32 into r6;
+    assert.eq r6 true;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    get.or_use len_vec__len__[false] 0u32 into r7;
+    is.eq r7 1u32 into r8;
+    assert.eq r8 true;
+    position end_otherwise_0_1;
+
+constructor:
+    assert.eq edition 0u16;
