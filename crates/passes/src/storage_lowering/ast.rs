@@ -53,9 +53,9 @@ impl StorageLoweringVisitor<'_> {
     ///
     /// This preserves strict source evaluation order for expression prefixes. Strict-prefix
     /// contexts materialize non-discardable values before lowering the next sibling, while
-    /// ternary branches keep branch-produced values inside the branch that produced them. The
-    /// lowered finalizer never assigns a branch-local value into a parent scope and reads it
-    /// after the branch rejoins.
+    /// ternary branches keep branch-produced effects inside the branch that selected them. When
+    /// a later statement needs a branch-produced value, statement lowering predeclares a local
+    /// and assigns each branch into it; the existing SSA pass then owns the post-branch join.
     fn emit_expression_with_continuation(
         &mut self,
         expression: Expression,
@@ -320,6 +320,28 @@ impl StorageLoweringVisitor<'_> {
             self.state.node_builder.next_id(),
         ));
         Path::from(temp_ident).to_local().into()
+    }
+
+    fn default_expression_for_type(&mut self, type_: &Type, span: Span) -> Expression {
+        match type_ {
+            Type::Optional(OptionalType { inner }) => self.literal_none_optional(*inner.clone()),
+            Type::Unit => {
+                let id = self.state.node_builder.next_id();
+                self.state.type_table.insert(id, Type::Unit);
+                UnitExpression { span, id }.into()
+            }
+            _ => {
+                let expression = self.zero(type_);
+                self.state.type_table.insert(expression.id(), type_.clone());
+                expression
+            }
+        }
+    }
+
+    fn local_path_for_type(&mut self, identifier: Identifier, type_: Type) -> Expression {
+        let path: Expression = Path::from(identifier).to_local().into();
+        self.state.type_table.insert(path.id(), type_);
+        path
     }
 
     fn expression_may_emit_cps_statements(expression: &Expression) -> bool {
@@ -871,6 +893,11 @@ impl StorageLoweringVisitor<'_> {
         statements
     }
 
+    fn emitted_statements_then_tail(&mut self, mut statements: Vec<Statement>, tail: &[Statement]) -> Vec<Statement> {
+        statements.extend(self.reconstruct_block_statements(tail.to_vec()));
+        statements
+    }
+
     fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
         let (block, additional_statements) = self.reconstruct_block(input);
         debug_assert!(additional_statements.is_empty(), "block reconstruction returns no unconditional prelude");
@@ -894,6 +921,36 @@ impl StorageLoweringVisitor<'_> {
         let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
         let tail = tail.to_vec();
 
+        if let DefinitionPlace::Single(identifier) = input.place {
+            let type_ = type_
+                .clone()
+                .or_else(|| self.expression_type_for_materialization(&input.value))
+                .expect("storage lowering should know the type before branch-result materialization");
+            self.state.type_table.insert(identifier.id, type_.clone());
+
+            let initial_value = self.default_expression_for_type(&type_, input.span);
+            let initial_definition = DefinitionStatement {
+                place: DefinitionPlace::Single(identifier),
+                type_: Some(type_.clone()),
+                value: initial_value,
+                span: input.span,
+                id: self.state.node_builder.next_id(),
+            };
+
+            let mut statements = vec![initial_definition.into()];
+            statements.extend(self.emit_expression_with_continuation(
+                input.value.clone(),
+                Rc::new(move |value, this| {
+                    let place = this.local_path_for_type(identifier, type_.clone());
+                    vec![
+                        AssignStatement { place, value, span: input.span, id: this.state.node_builder.next_id() }
+                            .into(),
+                    ]
+                }),
+            ));
+            return self.emitted_statements_then_tail(statements, &tail);
+        }
+
         self.emit_expression_with_continuation(
             input.value.clone(),
             Rc::new(move |value, this| {
@@ -913,7 +970,7 @@ impl StorageLoweringVisitor<'_> {
     fn reconstruct_assert_with_tail(&mut self, input: AssertStatement, tail: &[Statement]) -> Vec<Statement> {
         let tail = tail.to_vec();
 
-        match input.variant.clone() {
+        let statements = match input.variant.clone() {
             AssertVariant::Assert(expression) => self.emit_expression_with_continuation(
                 expression,
                 Rc::new(move |expression, this| {
@@ -923,7 +980,7 @@ impl StorageLoweringVisitor<'_> {
                         id: this.state.node_builder.next_id(),
                     }
                     .into();
-                    this.statement_then_tail(statement, tail.clone())
+                    vec![statement]
                 }),
             ),
             AssertVariant::AssertEq(left, right) => self.emit_expression_with_continuation(
@@ -938,7 +995,6 @@ impl StorageLoweringVisitor<'_> {
                     };
                     let input = input.clone();
                     let right = right.clone();
-                    let tail = tail.clone();
                     statements.extend(this.emit_expression_with_continuation(
                         right,
                         Rc::new(move |right, this| {
@@ -948,7 +1004,7 @@ impl StorageLoweringVisitor<'_> {
                                 id: this.state.node_builder.next_id(),
                             }
                             .into();
-                            this.statement_then_tail(statement, tail.clone())
+                            vec![statement]
                         }),
                     ));
                     statements
@@ -966,7 +1022,6 @@ impl StorageLoweringVisitor<'_> {
                     };
                     let input = input.clone();
                     let right = right.clone();
-                    let tail = tail.clone();
                     statements.extend(this.emit_expression_with_continuation(
                         right,
                         Rc::new(move |right, this| {
@@ -976,13 +1031,14 @@ impl StorageLoweringVisitor<'_> {
                                 id: this.state.node_builder.next_id(),
                             }
                             .into();
-                            this.statement_then_tail(statement, tail.clone())
+                            vec![statement]
                         }),
                     ));
                     statements
                 }),
             ),
-        }
+        };
+        self.emitted_statements_then_tail(statements, &tail)
     }
 
     fn reconstruct_assign_with_tail(&mut self, input: AssignStatement, tail: &[Statement]) -> Vec<Statement> {
@@ -1004,7 +1060,7 @@ impl StorageLoweringVisitor<'_> {
 
             let var_name = path.identifier().name;
             let mapping_symbol = Symbol::intern(&format!("{var_name}__"));
-            return self.emit_expression_with_continuation(
+            let statements = self.emit_expression_with_continuation(
                 value,
                 Rc::new(move |new_value, this| {
                     let mapping_ident = Identifier::new(mapping_symbol, this.state.node_builder.next_id());
@@ -1047,16 +1103,16 @@ impl StorageLoweringVisitor<'_> {
                             })
                         };
 
-                    this.statement_then_tail(statement, tail.clone())
+                    vec![statement]
                 }),
             );
+            return self.emitted_statements_then_tail(statements, &tail);
         }
 
-        self.emit_assign_place_with_continuation(
+        let statements = self.emit_assign_place_with_continuation(
             place,
             Rc::new(move |place, this| {
                 let value = value.clone();
-                let tail = tail.clone();
                 this.emit_expression_with_continuation(
                     value,
                     Rc::new(move |value, this| {
@@ -1067,11 +1123,12 @@ impl StorageLoweringVisitor<'_> {
                             id: this.state.node_builder.next_id(),
                         }
                         .into();
-                        this.statement_then_tail(statement, tail.clone())
+                        vec![statement]
                     }),
                 )
             }),
-        )
+        );
+        self.emitted_statements_then_tail(statements, &tail)
     }
 
     fn reconstruct_expression_statement_with_tail(
@@ -1082,7 +1139,7 @@ impl StorageLoweringVisitor<'_> {
         let keep_expression = !expression_can_be_discarded(&input.expression, self.state);
         let tail = tail.to_vec();
 
-        self.emit_expression_with_continuation(
+        let statements = self.emit_expression_with_continuation(
             input.expression.clone(),
             Rc::new(move |expression, this| {
                 let legal_expression_statement =
@@ -1112,15 +1169,16 @@ impl StorageLoweringVisitor<'_> {
                     }
                     .into()
                 };
-                this.statement_then_tail(statement, tail.clone())
+                vec![statement]
             }),
-        )
+        );
+        self.emitted_statements_then_tail(statements, &tail)
     }
 
     fn reconstruct_conditional_with_tail(&mut self, input: ConditionalStatement, tail: &[Statement]) -> Vec<Statement> {
         let tail = tail.to_vec();
 
-        self.emit_expression_with_continuation(
+        let statements = self.emit_expression_with_continuation(
             input.condition.clone(),
             Rc::new(move |condition, this| {
                 let (then, then_statements) = this.reconstruct_block(input.then.clone());
@@ -1135,9 +1193,10 @@ impl StorageLoweringVisitor<'_> {
                     id: this.state.node_builder.next_id(),
                 }
                 .into();
-                this.statement_then_tail(statement, tail.clone())
+                vec![statement]
             }),
-        )
+        );
+        self.emitted_statements_then_tail(statements, &tail)
     }
 
     fn reconstruct_otherwise_statement(&mut self, statement: Statement) -> Box<Statement> {
@@ -1158,14 +1217,13 @@ impl StorageLoweringVisitor<'_> {
         let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
         let tail = tail.to_vec();
 
-        self.emit_expression_with_continuation(
+        let statements = self.emit_expression_with_continuation(
             input.start.clone(),
             Rc::new(move |start, this| {
                 let mut statements = Vec::new();
                 let start = this.materialize_strict_prefix_expression(start, &mut statements);
                 let input = input.clone();
                 let type_ = type_.clone();
-                let tail = tail.clone();
                 statements.extend(this.emit_expression_with_continuation(
                     input.stop.clone(),
                     Rc::new(move |stop, this| {
@@ -1185,12 +1243,13 @@ impl StorageLoweringVisitor<'_> {
                             id: this.state.node_builder.next_id(),
                         }
                         .into();
-                        this.statement_then_tail(statement, tail.clone())
+                        vec![statement]
                     }),
                 ));
                 statements
             }),
-        )
+        );
+        self.emitted_statements_then_tail(statements, &tail)
     }
 
     fn reconstruct_return_with_tail(&mut self, input: ReturnStatement) -> Vec<Statement> {
