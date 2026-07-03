@@ -463,13 +463,10 @@ impl StorageLoweringVisitor<'_> {
                         continuation.clone()(TernaryExpression { condition, if_true, if_false, span, id }.into(), this)
                     } else {
                         this.emit_ternary_branches_with_continuation(
-                            condition,
-                            if_true,
-                            if_false,
+                            TernaryExpression { condition, if_true, if_false, span, id },
                             true_prefix,
                             false_prefix,
                             optional_type_for_reconstructed.clone(),
-                            span,
                             continuation.clone(),
                         )
                     }
@@ -481,13 +478,10 @@ impl StorageLoweringVisitor<'_> {
             condition,
             Rc::new(move |condition, this| {
                 this.emit_ternary_branches_with_continuation(
-                    condition,
-                    if_true.clone(),
-                    if_false.clone(),
+                    TernaryExpression { condition, if_true: if_true.clone(), if_false: if_false.clone(), span, id },
                     Vec::new(),
                     Vec::new(),
                     optional_type.clone(),
-                    span,
                     continuation.clone(),
                 )
             }),
@@ -496,15 +490,13 @@ impl StorageLoweringVisitor<'_> {
 
     fn emit_ternary_branches_with_continuation(
         &mut self,
-        condition: Expression,
-        if_true: Expression,
-        if_false: Expression,
+        input: TernaryExpression,
         true_prefix: Vec<Statement>,
         false_prefix: Vec<Statement>,
         optional_type: Option<Type>,
-        span: Span,
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
+        let TernaryExpression { condition, if_true, if_false, span, .. } = input;
         let optional_type_for_true = optional_type.clone();
         let optional_type_for_false = optional_type.clone();
         let true_continuation = continuation.clone();
