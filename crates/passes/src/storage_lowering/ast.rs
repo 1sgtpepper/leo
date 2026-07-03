@@ -845,26 +845,154 @@ impl StorageLoweringVisitor<'_> {
         }
     }
 
-    fn statement_requires_tail_cps(statement: &Statement) -> bool {
+    fn expression_requires_tail_cps(&self, expression: &Expression) -> bool {
+        match expression {
+            Expression::Array(input) => input.elements.iter().any(|element| self.expression_requires_tail_cps(element)),
+            Expression::ArrayAccess(input) => {
+                self.expression_requires_tail_cps(&input.array) || self.expression_requires_tail_cps(&input.index)
+            }
+            Expression::Binary(input) => {
+                self.expression_requires_tail_cps(&input.left) || self.expression_requires_tail_cps(&input.right)
+            }
+            Expression::Call(input) => {
+                input.const_arguments.iter().any(|argument| self.expression_requires_tail_cps(argument))
+                    || input.arguments.iter().any(|argument| self.expression_requires_tail_cps(argument))
+            }
+            Expression::Cast(input) => self.expression_requires_tail_cps(&input.expression),
+            Expression::Composite(input) => {
+                input.const_arguments.iter().any(|argument| self.expression_requires_tail_cps(argument))
+                    || input
+                        .members
+                        .iter()
+                        .filter_map(|member| member.expression.as_ref())
+                        .any(|expression| self.expression_requires_tail_cps(expression))
+                    || input.base.as_deref().is_some_and(|base| self.expression_requires_tail_cps(base))
+            }
+            Expression::DynamicOp(input) => {
+                self.expression_requires_tail_cps(&input.target_program)
+                    || input.network.as_ref().is_some_and(|network| self.expression_requires_tail_cps(network))
+                    || match &input.kind {
+                        DynamicOpKind::Read { .. } | DynamicOpKind::Op { .. } => true,
+                        DynamicOpKind::Call { arguments, .. } => {
+                            arguments.iter().any(|argument| self.expression_requires_tail_cps(argument))
+                        }
+                    }
+            }
+            Expression::Intrinsic(input) => {
+                Self::expression_requires_branch_cps(expression)
+                    || input.arguments.iter().any(|argument| self.expression_requires_tail_cps(argument))
+            }
+            Expression::MemberAccess(input) => self.expression_requires_tail_cps(&input.inner),
+            Expression::Repeat(input) => {
+                self.expression_requires_tail_cps(&input.expr) || self.expression_requires_tail_cps(&input.count)
+            }
+            Expression::Ternary(input) => {
+                self.expression_requires_tail_cps(&input.condition)
+                    || self.expression_may_emit_after_reconstruction(&input.if_true)
+                    || self.expression_may_emit_after_reconstruction(&input.if_false)
+            }
+            Expression::Tuple(input) => input.elements.iter().any(|element| self.expression_requires_tail_cps(element)),
+            Expression::TupleAccess(input) => self.expression_requires_tail_cps(&input.tuple),
+            Expression::Unary(input) => self.expression_requires_tail_cps(&input.receiver),
+            _ => Self::expression_requires_branch_cps(expression),
+        }
+    }
+
+    fn expression_may_emit_after_reconstruction(&self, expression: &Expression) -> bool {
+        Self::expression_may_emit_cps_statements(expression) || self.expression_reconstructs_to_branch_cps(expression)
+    }
+
+    fn expression_reconstructs_to_branch_cps(&self, expression: &Expression) -> bool {
+        match expression {
+            Expression::Array(input) => {
+                input.elements.iter().any(|element| self.expression_reconstructs_to_branch_cps(element))
+            }
+            Expression::ArrayAccess(input) => {
+                self.expression_reconstructs_to_branch_cps(&input.array)
+                    || self.expression_reconstructs_to_branch_cps(&input.index)
+            }
+            Expression::Binary(input) => {
+                self.expression_reconstructs_to_branch_cps(&input.left)
+                    || self.expression_reconstructs_to_branch_cps(&input.right)
+            }
+            Expression::Call(input) => {
+                input.const_arguments.iter().any(|argument| self.expression_reconstructs_to_branch_cps(argument))
+                    || input.arguments.iter().any(|argument| self.expression_reconstructs_to_branch_cps(argument))
+            }
+            Expression::Cast(input) => self.expression_reconstructs_to_branch_cps(&input.expression),
+            Expression::Composite(input) => {
+                input.const_arguments.iter().any(|argument| self.expression_reconstructs_to_branch_cps(argument))
+                    || input
+                        .members
+                        .iter()
+                        .filter_map(|member| member.expression.as_ref())
+                        .any(|expression| self.expression_reconstructs_to_branch_cps(expression))
+                    || input.base.as_deref().is_some_and(|base| self.expression_reconstructs_to_branch_cps(base))
+            }
+            Expression::DynamicOp(input) => {
+                self.expression_reconstructs_to_branch_cps(&input.target_program)
+                    || input.network.as_ref().is_some_and(|network| self.expression_reconstructs_to_branch_cps(network))
+                    || match &input.kind {
+                        DynamicOpKind::Read { .. } | DynamicOpKind::Op { .. } => false,
+                        DynamicOpKind::Call { arguments, .. } => {
+                            arguments.iter().any(|argument| self.expression_reconstructs_to_branch_cps(argument))
+                        }
+                    }
+            }
+            Expression::Intrinsic(input) => {
+                input.arguments.iter().any(|argument| self.expression_reconstructs_to_branch_cps(argument))
+            }
+            Expression::MemberAccess(input) => self.expression_reconstructs_to_branch_cps(&input.inner),
+            Expression::Path(path) => self.path_reconstructs_to_branch_cps(path),
+            Expression::Repeat(input) => {
+                self.expression_reconstructs_to_branch_cps(&input.expr)
+                    || self.expression_reconstructs_to_branch_cps(&input.count)
+            }
+            Expression::Ternary(input) => {
+                self.expression_reconstructs_to_branch_cps(&input.condition)
+                    || self.expression_reconstructs_to_branch_cps(&input.if_true)
+                    || self.expression_reconstructs_to_branch_cps(&input.if_false)
+            }
+            Expression::Tuple(input) => {
+                input.elements.iter().any(|element| self.expression_reconstructs_to_branch_cps(element))
+            }
+            Expression::TupleAccess(input) => self.expression_reconstructs_to_branch_cps(&input.tuple),
+            Expression::Unary(input) => self.expression_reconstructs_to_branch_cps(&input.receiver),
+            _ => false,
+        }
+    }
+
+    fn path_reconstructs_to_branch_cps(&self, path: &Path) -> bool {
+        let Some(location) = path.try_global_location() else {
+            return false;
+        };
+        self.state
+            .symbol_table
+            .lookup_global(self.program, location)
+            .and_then(|var| var.type_.as_ref())
+            .is_some_and(|type_| matches!(type_, Type::Optional(_)))
+    }
+
+    fn statement_requires_tail_cps(&self, statement: &Statement) -> bool {
         match statement {
             Statement::Assert(input) => match &input.variant {
-                AssertVariant::Assert(expression) => Self::expression_requires_branch_cps(expression),
+                AssertVariant::Assert(expression) => self.expression_requires_tail_cps(expression),
                 AssertVariant::AssertEq(left, right) | AssertVariant::AssertNeq(left, right) => {
-                    Self::expression_requires_branch_cps(left) || Self::expression_requires_branch_cps(right)
+                    self.expression_requires_tail_cps(left) || self.expression_requires_tail_cps(right)
                 }
             },
             Statement::Assign(input) => {
-                Self::expression_requires_branch_cps(&input.place) || Self::expression_requires_branch_cps(&input.value)
+                self.expression_requires_tail_cps(&input.place) || self.expression_requires_tail_cps(&input.value)
             }
             Statement::Block(_) => false,
-            Statement::Conditional(input) => Self::expression_requires_branch_cps(&input.condition),
-            Statement::Const(input) => Self::expression_requires_branch_cps(&input.value),
-            Statement::Definition(input) => Self::expression_requires_branch_cps(&input.value),
-            Statement::Expression(input) => Self::expression_requires_branch_cps(&input.expression),
+            Statement::Conditional(input) => self.expression_requires_tail_cps(&input.condition),
+            Statement::Const(input) => self.expression_requires_tail_cps(&input.value),
+            Statement::Definition(input) => self.expression_requires_tail_cps(&input.value),
+            Statement::Expression(input) => self.expression_requires_tail_cps(&input.expression),
             Statement::Iteration(input) => {
-                Self::expression_requires_branch_cps(&input.start) || Self::expression_requires_branch_cps(&input.stop)
+                self.expression_requires_tail_cps(&input.start) || self.expression_requires_tail_cps(&input.stop)
             }
-            Statement::Return(input) => Self::expression_requires_branch_cps(&input.expression),
+            Statement::Return(input) => self.expression_requires_tail_cps(&input.expression),
         }
     }
 
@@ -873,7 +1001,7 @@ impl StorageLoweringVisitor<'_> {
         let mut reconstructed = Vec::new();
 
         while let Some(statement) = remaining.pop_front() {
-            if Self::statement_requires_tail_cps(&statement) {
+            if self.statement_requires_tail_cps(&statement) {
                 // Replay the remaining block inside the first branch-sensitive statement, so
                 // statements after it only observe values from the branch that produced them.
                 let tail = remaining.into_iter().collect::<Vec<_>>();
