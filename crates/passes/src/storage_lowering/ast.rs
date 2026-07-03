@@ -291,9 +291,11 @@ impl StorageLoweringVisitor<'_> {
             return expression;
         }
 
-        let Some(type_) = self.state.type_table.get(&expression.id()) else {
-            return expression;
-        };
+        let type_ = self
+            .state
+            .type_table
+            .get(&expression.id())
+            .expect("type checking should assign a type before strict-prefix materialization");
 
         let temp_sym = self.state.assigner.unique_symbol("$eval", "$");
         let temp_ident = Identifier { name: temp_sym, span: Default::default(), id: self.state.node_builder.next_id() };
@@ -744,6 +746,8 @@ impl StorageLoweringVisitor<'_> {
 
         while let Some(statement) = remaining.pop_front() {
             if Self::statement_requires_tail_cps(&statement) {
+                // Replay the remaining block inside the first branch-sensitive statement, so
+                // statements after it only observe values from the branch that produced them.
                 let tail = remaining.into_iter().collect::<Vec<_>>();
                 reconstructed.extend(self.reconstruct_statement_with_tail(statement, &tail));
                 return reconstructed;
