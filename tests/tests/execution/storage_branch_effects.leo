@@ -69,11 +69,12 @@ input = ["0u32"]
 
 */
 
+struct Update {
+    x: u32,
+    y: u32,
+}
+
 program storage_branch_effects.aleo {
-    struct Update {
-        x: u32,
-        y: u32,
-    }
 
     @noupgrade
     constructor() {}
