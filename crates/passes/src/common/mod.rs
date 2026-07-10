@@ -79,10 +79,7 @@ fn contains_non_discardable_operation(expr: &Expression, state: &CompilerState) 
                     // this check is used.
                     .filter_map(|init| init.expression.as_ref())
                     .any(|member| contains_non_discardable_operation(member, state))
-                || expr
-                    .base
-                    .as_ref()
-                    .is_some_and(|base| contains_non_discardable_operation(base, state))
+                || expr.base.as_ref().is_some_and(|base| contains_non_discardable_operation(base, state))
         }
         Expression::MemberAccess(expr) => contains_non_discardable_operation(&expr.inner, state),
         Expression::Repeat(expr) => {

@@ -403,9 +403,8 @@ impl StorageLoweringVisitor<'_> {
             next,
             Rc::new(move |next, this| {
                 let mut statements = Vec::new();
-                let rest_may_emit = rest
-                    .iter()
-                    .any(|expression| this.expression_may_emit_after_reconstruction(expression));
+                let rest_may_emit =
+                    rest.iter().any(|expression| this.expression_may_emit_after_reconstruction(expression));
                 let next =
                     if rest_may_emit { this.materialize_strict_prefix_expression(next, &mut statements) } else { next };
                 let mut rebuilt = rebuilt.clone();
@@ -494,12 +493,8 @@ impl StorageLoweringVisitor<'_> {
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
         let TernaryExpression { condition, if_true, if_false, span, .. } = input;
-        let type_ = self
-            .state
-            .type_table
-            .get(&id)
-            .expect("type checking should assign a type to ternary expressions")
-            .clone();
+        let type_ =
+            self.state.type_table.get(&id).expect("type checking should assign a type to ternary expressions").clone();
         let initial_value = match &type_ {
             Type::Optional(optional) => self.literal_none_optional(*optional.inner.clone()),
             Type::Unit => UnitExpression { span, id: self.state.node_builder.next_id() }.into(),
@@ -508,7 +503,8 @@ impl StorageLoweringVisitor<'_> {
         self.state.type_table.insert(initial_value.id(), type_.clone());
 
         let result_sym = self.state.assigner.unique_symbol("$ternary_result", "$");
-        let result_ident = Identifier { name: result_sym, span: Default::default(), id: self.state.node_builder.next_id() };
+        let result_ident =
+            Identifier { name: result_sym, span: Default::default(), id: self.state.node_builder.next_id() };
         self.state.type_table.insert(result_ident.id, type_.clone());
         let result_expression: Expression = Path::from(result_ident).to_local().into();
         self.state.type_table.insert(result_expression.id(), type_.clone());
@@ -527,13 +523,15 @@ impl StorageLoweringVisitor<'_> {
         then_statements.extend(self.emit_expression_with_continuation(
             if_true,
             Rc::new(move |if_true, this| {
-                vec![AssignStatement {
-                    place: true_result_expression.clone(),
-                    value: if_true,
-                    span,
-                    id: this.state.node_builder.next_id(),
-                }
-                .into()]
+                vec![
+                    AssignStatement {
+                        place: true_result_expression.clone(),
+                        value: if_true,
+                        span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into(),
+                ]
             }),
         ));
 
@@ -542,13 +540,15 @@ impl StorageLoweringVisitor<'_> {
         else_statements.extend(self.emit_expression_with_continuation(
             if_false,
             Rc::new(move |if_false, this| {
-                vec![AssignStatement {
-                    place: false_result_expression.clone(),
-                    value: if_false,
-                    span,
-                    id: this.state.node_builder.next_id(),
-                }
-                .into()]
+                vec![
+                    AssignStatement {
+                        place: false_result_expression.clone(),
+                        value: if_false,
+                        span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into(),
+                ]
             }),
         ));
 
