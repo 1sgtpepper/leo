@@ -372,6 +372,7 @@ impl Expression {
             Expression::Composite(expr) => {
                 expr.const_arguments.iter().all(|e| e.is_pure(get_type))
                     && expr.members.iter().all(|init| init.expression.as_ref().is_none_or(|e| e.is_pure(get_type)))
+                    && expr.base.as_ref().is_none_or(|base| base.is_pure(get_type))
             }
             Expression::Ternary(expr) => {
                 expr.condition.is_pure(get_type) && expr.if_true.is_pure(get_type) && expr.if_false.is_pure(get_type)

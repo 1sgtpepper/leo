@@ -15,7 +15,7 @@
 // along with the Leo library. If not, see <https://www.gnu.org/licenses/>.
 
 use super::StorageLoweringVisitor;
-use crate::{SymbolAccessCollector, expression_can_be_discarded};
+use crate::expression_can_be_discarded;
 
 use leo_ast::*;
 use leo_span::{Span, Symbol, sym};
@@ -53,9 +53,9 @@ impl StorageLoweringVisitor<'_> {
     ///
     /// This preserves strict source evaluation order for expression prefixes. Strict-prefix
     /// contexts materialize non-discardable values before lowering the next sibling, while
-    /// ternary branches keep branch-produced effects inside the branch that selected them. When
-    /// a branch-local definition is used by following statements, statement lowering replays only
-    /// the tail prefix that still depends on branch-local values and rejoins after that prefix.
+    /// ternary branches keep branch-produced effects inside the branch that selected them. A
+    /// branch result is assigned to a shared temporary, so the continuation runs once after the
+    /// conditional and SSA forms the corresponding join.
     fn emit_expression_with_continuation(
         &mut self,
         expression: Expression,
@@ -77,7 +77,7 @@ impl StorageLoweringVisitor<'_> {
             }
             Expression::ArrayAccess(input) => {
                 let ArrayAccess { array, index, span, id } = *input;
-                let index_may_emit = Self::expression_may_emit_cps_statements(&index);
+                let index_may_emit = self.expression_may_emit_after_reconstruction(&index);
                 self.emit_expression_with_continuation(
                     array,
                     Rc::new(move |array, this| {
@@ -101,7 +101,7 @@ impl StorageLoweringVisitor<'_> {
             }
             Expression::Binary(input) => {
                 let BinaryExpression { left, right, op, span, id } = *input;
-                let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                let right_may_emit = self.expression_may_emit_after_reconstruction(&right);
                 self.emit_expression_with_continuation(
                     left,
                     Rc::new(move |left, this| {
@@ -173,7 +173,7 @@ impl StorageLoweringVisitor<'_> {
             }
             Expression::Repeat(input) => {
                 let RepeatExpression { expr, count, span, id } = *input;
-                let count_may_emit = Self::expression_may_emit_cps_statements(&count);
+                let count_may_emit = self.expression_may_emit_after_reconstruction(&count);
                 self.emit_expression_with_continuation(
                     expr,
                     Rc::new(move |expr, this| {
@@ -403,7 +403,9 @@ impl StorageLoweringVisitor<'_> {
             next,
             Rc::new(move |next, this| {
                 let mut statements = Vec::new();
-                let rest_may_emit = rest.iter().any(Self::expression_may_emit_cps_statements);
+                let rest_may_emit = rest
+                    .iter()
+                    .any(|expression| this.expression_may_emit_after_reconstruction(expression));
                 let next =
                     if rest_may_emit { this.materialize_strict_prefix_expression(next, &mut statements) } else { next };
                 let mut rebuilt = rebuilt.clone();
@@ -438,14 +440,9 @@ impl StorageLoweringVisitor<'_> {
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
         let TernaryExpression { condition, if_true, if_false, span, id } = input;
-        let optional_type = match self.state.type_table.get(&id) {
-            Some(Type::Optional(optional)) => Some(Type::Optional(optional)),
-            _ => None,
-        };
-        let true_arm_may_emit = Self::expression_may_emit_cps_statements(&if_true);
-        let false_arm_may_emit = Self::expression_may_emit_cps_statements(&if_false);
+        let true_arm_may_emit = self.expression_may_emit_after_reconstruction(&if_true);
+        let false_arm_may_emit = self.expression_may_emit_after_reconstruction(&if_false);
         if !true_arm_may_emit && !false_arm_may_emit {
-            let optional_type_for_reconstructed = optional_type.clone();
             let if_true_for_reconstruction = if_true.clone();
             let if_false_for_reconstruction = if_false.clone();
             return self.emit_expression_with_continuation(
@@ -466,7 +463,7 @@ impl StorageLoweringVisitor<'_> {
                             TernaryExpression { condition, if_true, if_false, span, id },
                             true_prefix,
                             false_prefix,
-                            optional_type_for_reconstructed.clone(),
+                            id,
                             continuation.clone(),
                         )
                     }
@@ -481,7 +478,7 @@ impl StorageLoweringVisitor<'_> {
                     TernaryExpression { condition, if_true: if_true.clone(), if_false: if_false.clone(), span, id },
                     Vec::new(),
                     Vec::new(),
-                    optional_type.clone(),
+                    id,
                     continuation.clone(),
                 )
             }),
@@ -493,51 +490,70 @@ impl StorageLoweringVisitor<'_> {
         input: TernaryExpression,
         true_prefix: Vec<Statement>,
         false_prefix: Vec<Statement>,
-        optional_type: Option<Type>,
+        id: leo_ast::NodeID,
         continuation: ExpressionContinuation,
     ) -> Vec<Statement> {
         let TernaryExpression { condition, if_true, if_false, span, .. } = input;
-        let optional_type_for_true = optional_type.clone();
-        let optional_type_for_false = optional_type.clone();
-        let true_continuation = continuation.clone();
-        let false_continuation = continuation.clone();
+        let type_ = self
+            .state
+            .type_table
+            .get(&id)
+            .expect("type checking should assign a type to ternary expressions")
+            .clone();
+        let initial_value = match &type_ {
+            Type::Optional(optional) => self.literal_none_optional(*optional.inner.clone()),
+            Type::Unit => UnitExpression { span, id: self.state.node_builder.next_id() }.into(),
+            _ => self.zero(&type_),
+        };
+        self.state.type_table.insert(initial_value.id(), type_.clone());
 
+        let result_sym = self.state.assigner.unique_symbol("$ternary_result", "$");
+        let result_ident = Identifier { name: result_sym, span: Default::default(), id: self.state.node_builder.next_id() };
+        self.state.type_table.insert(result_ident.id, type_.clone());
+        let result_expression: Expression = Path::from(result_ident).to_local().into();
+        self.state.type_table.insert(result_expression.id(), type_.clone());
+
+        let result_definition: Statement = DefinitionStatement {
+            place: DefinitionPlace::Single(result_ident),
+            type_: Some(type_),
+            value: initial_value,
+            span,
+            id: self.state.node_builder.next_id(),
+        }
+        .into();
+
+        let true_result_expression = result_expression.clone();
         let mut then_statements = true_prefix;
         then_statements.extend(self.emit_expression_with_continuation(
             if_true,
             Rc::new(move |if_true, this| {
-                let mut statements = Vec::new();
-                let if_true = if let Some(optional_type) = optional_type_for_true.clone() {
-                    let (if_true, branch_statements) = this.bind_optional_ternary_branch(if_true, optional_type, span);
-                    statements.extend(branch_statements);
-                    if_true
-                } else {
-                    if_true
-                };
-                statements.extend(true_continuation.clone()(if_true, this));
-                statements
+                vec![AssignStatement {
+                    place: true_result_expression.clone(),
+                    value: if_true,
+                    span,
+                    id: this.state.node_builder.next_id(),
+                }
+                .into()]
             }),
         ));
 
+        let false_result_expression = result_expression.clone();
         let mut else_statements = false_prefix;
         else_statements.extend(self.emit_expression_with_continuation(
             if_false,
             Rc::new(move |if_false, this| {
-                let mut statements = Vec::new();
-                let if_false = if let Some(optional_type) = optional_type_for_false.clone() {
-                    let (if_false, branch_statements) =
-                        this.bind_optional_ternary_branch(if_false, optional_type, span);
-                    statements.extend(branch_statements);
-                    if_false
-                } else {
-                    if_false
-                };
-                statements.extend(false_continuation.clone()(if_false, this));
-                statements
+                vec![AssignStatement {
+                    place: false_result_expression.clone(),
+                    value: if_false,
+                    span,
+                    id: this.state.node_builder.next_id(),
+                }
+                .into()]
             }),
         ));
 
-        vec![
+        let mut statements = vec![result_definition];
+        statements.push(
             ConditionalStatement {
                 condition,
                 then: Block { statements: then_statements, span, id: self.state.node_builder.next_id() },
@@ -548,30 +564,9 @@ impl StorageLoweringVisitor<'_> {
                 id: self.state.node_builder.next_id(),
             }
             .into(),
-        ]
-    }
-
-    fn bind_optional_ternary_branch(
-        &mut self,
-        expression: Expression,
-        optional_type: Type,
-        span: Span,
-    ) -> (Expression, Vec<Statement>) {
-        let temp_sym = self.state.assigner.unique_symbol("$ternary_branch", "$");
-        let temp_ident = Identifier { name: temp_sym, span: Default::default(), id: self.state.node_builder.next_id() };
-        self.state.type_table.insert(temp_ident.id, optional_type.clone());
-
-        let definition = DefinitionStatement {
-            place: DefinitionPlace::Single(temp_ident),
-            type_: Some(optional_type.clone()),
-            value: expression,
-            span,
-            id: self.state.node_builder.next_id(),
-        };
-
-        let path: Expression = Path::from(temp_ident).to_local().into();
-        self.state.type_table.insert(path.id(), optional_type);
-        (path, vec![definition.into()])
+        );
+        statements.extend(continuation(result_expression, self));
+        statements
     }
 
     fn emit_intrinsic_with_continuation(
@@ -1002,16 +997,12 @@ impl StorageLoweringVisitor<'_> {
 
         while let Some(statement) = remaining.pop_front() {
             if self.statement_requires_tail_cps(&statement) {
-                // Replay the remaining block inside the first branch-sensitive statement, so
-                // statements after it only observe values from the branch that produced them.
-                let tail = remaining.into_iter().collect::<Vec<_>>();
-                reconstructed.extend(self.reconstruct_statement_with_tail(statement, &tail));
-                return reconstructed;
+                reconstructed.extend(self.reconstruct_statement_with_tail(statement, &[]));
+            } else {
+                let (statement, additional_statements) = self.reconstruct_statement(statement);
+                reconstructed.extend(additional_statements);
+                reconstructed.push(statement);
             }
-
-            let (statement, additional_statements) = self.reconstruct_statement(statement);
-            reconstructed.extend(additional_statements);
-            reconstructed.push(statement);
         }
 
         reconstructed
@@ -1042,80 +1033,6 @@ impl StorageLoweringVisitor<'_> {
         statements
     }
 
-    fn split_tail_after_last_local_use(
-        &mut self,
-        tail: &[Statement],
-        symbol: Symbol,
-    ) -> (Vec<Statement>, Vec<Statement>) {
-        let mut branch_symbols = vec![symbol];
-        let mut split_index = 0;
-        for (index, statement) in tail.iter().enumerate() {
-            if self.statement_uses_any_local_symbol(statement, &branch_symbols) {
-                let old_split_index = split_index;
-                split_index = index + 1;
-                tail[old_split_index..split_index]
-                    .iter()
-                    .for_each(|statement| Self::extend_branch_local_symbols(statement, &mut branch_symbols));
-            }
-        }
-
-        (tail[..split_index].to_vec(), tail[split_index..].to_vec())
-    }
-
-    fn statement_uses_any_local_symbol(&mut self, statement: &Statement, symbols: &[Symbol]) -> bool {
-        let mut collector = SymbolAccessCollector::new(self.state);
-        collector.visit_statement(statement);
-        collector
-            .symbol_accesses
-            .iter()
-            .any(|(path, _)| symbols.iter().any(|symbol| Self::path_matches_local_symbol(path, *symbol)))
-    }
-
-    fn path_matches_local_symbol(path: &Path, symbol: Symbol) -> bool {
-        path.try_local_symbol().is_some_and(|local| local == symbol)
-            || (path.identifier().name == symbol
-                && path.try_global_location().is_none()
-                && path.qualifier().is_empty()
-                && path.program().is_none())
-    }
-
-    fn extend_branch_local_symbols(statement: &Statement, symbols: &mut Vec<Symbol>) {
-        match statement {
-            Statement::Assign(input) => {
-                if let Some(symbol) = Self::assigned_local_symbol(&input.place) {
-                    Self::push_branch_local_symbol(symbols, symbol);
-                }
-            }
-            Statement::Const(input) => Self::push_branch_local_symbol(symbols, input.place.name),
-            Statement::Definition(input) => match &input.place {
-                DefinitionPlace::Single(identifier) => Self::push_branch_local_symbol(symbols, identifier.name),
-                DefinitionPlace::Multiple(identifiers) => {
-                    identifiers.iter().for_each(|identifier| Self::push_branch_local_symbol(symbols, identifier.name));
-                }
-            },
-            _ => {}
-        }
-    }
-
-    fn assigned_local_symbol(expression: &Expression) -> Option<Symbol> {
-        match expression {
-            Expression::ArrayAccess(input) => Self::assigned_local_symbol(&input.array),
-            Expression::MemberAccess(input) => Self::assigned_local_symbol(&input.inner),
-            Expression::Path(path) => path.try_local_symbol().or_else(|| {
-                (path.try_global_location().is_none() && path.qualifier().is_empty() && path.program().is_none())
-                    .then_some(path.identifier().name)
-            }),
-            Expression::TupleAccess(input) => Self::assigned_local_symbol(&input.tuple),
-            _ => None,
-        }
-    }
-
-    fn push_branch_local_symbol(symbols: &mut Vec<Symbol>, symbol: Symbol) {
-        if !symbols.contains(&symbol) {
-            symbols.push(symbol);
-        }
-    }
-
     fn reconstruct_block_with_tail(&mut self, input: Block, tail: &[Statement]) -> Vec<Statement> {
         let (block, additional_statements) = self.reconstruct_block(input);
         debug_assert!(additional_statements.is_empty(), "block reconstruction returns no unconditional prelude");
@@ -1138,25 +1055,6 @@ impl StorageLoweringVisitor<'_> {
     fn reconstruct_definition_with_tail(&mut self, input: DefinitionStatement, tail: &[Statement]) -> Vec<Statement> {
         let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
         let tail = tail.to_vec();
-
-        if let DefinitionPlace::Single(identifier) = input.place {
-            let (branch_tail, remaining_tail) = self.split_tail_after_last_local_use(&tail, identifier.name);
-            let statements = self.emit_expression_with_continuation(
-                input.value.clone(),
-                Rc::new(move |value, this| {
-                    let statement = DefinitionStatement {
-                        place: DefinitionPlace::Single(identifier),
-                        type_: type_.clone(),
-                        value,
-                        span: input.span,
-                        id: this.state.node_builder.next_id(),
-                    }
-                    .into();
-                    this.statement_then_tail(statement, branch_tail.clone())
-                }),
-            );
-            return self.emitted_statements_then_tail(statements, &remaining_tail);
-        }
 
         self.emit_expression_with_continuation(
             input.value.clone(),
@@ -1194,7 +1092,7 @@ impl StorageLoweringVisitor<'_> {
                 left,
                 Rc::new(move |left, this| {
                     let mut statements = Vec::new();
-                    let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                    let right_may_emit = this.expression_may_emit_after_reconstruction(&right);
                     let left = if right_may_emit {
                         this.materialize_strict_prefix_expression(left, &mut statements)
                     } else {
@@ -1221,7 +1119,7 @@ impl StorageLoweringVisitor<'_> {
                 left,
                 Rc::new(move |left, this| {
                     let mut statements = Vec::new();
-                    let right_may_emit = Self::expression_may_emit_cps_statements(&right);
+                    let right_may_emit = this.expression_may_emit_after_reconstruction(&right);
                     let left = if right_may_emit {
                         this.materialize_strict_prefix_expression(left, &mut statements)
                     } else {
