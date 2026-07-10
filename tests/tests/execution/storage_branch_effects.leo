@@ -46,11 +46,9 @@ input = ["false", "false"]
 program = "storage_branch_effects.aleo"
 function = "prefix_order_tuple"
 input = []
-
 */
 
 program storage_branch_effects.aleo {
-
     @noupgrade
     constructor() {}
 
@@ -155,5 +153,4 @@ program storage_branch_effects.aleo {
             assert(prefix_vec.len() == 1u32);
         };
     }
-
 }
