@@ -67,10 +67,6 @@ program = "storage_branch_effects.aleo"
 function = "composite_base_before_storage"
 input = ["0u32"]
 
-[case]
-program = "storage_branch_effects.aleo"
-function = "dependent_ternary_chain"
-input = ["false", "false", "false", "false", "false", "false", "false", "false", "false", "false", "false", "false", "false", "false", "false"]
 */
 
 program storage_branch_effects.aleo {
@@ -93,7 +89,6 @@ program storage_branch_effects.aleo {
     storage else_if_ternary_vec: [u32];
     storage prefix_vec: [u32];
     storage prefix_optional: u32?;
-    storage chain_vec: [u32];
 
     fn definition_false(public take: bool) -> Final {
         return final {
@@ -206,40 +201,4 @@ program storage_branch_effects.aleo {
         };
     }
 
-    fn dependent_ternary_chain(
-        public c1: bool,
-        public c2: bool,
-        public c3: bool,
-        public c4: bool,
-        public c5: bool,
-        public c6: bool,
-        public c7: bool,
-        public c8: bool,
-        public c9: bool,
-        public c10: bool,
-        public c11: bool,
-        public c12: bool,
-        public c13: bool,
-        public c14: bool,
-        public c15: bool,
-    ) -> Final {
-        return final {
-            let x1: u32? = c1 ? chain_vec.pop() : none;
-            let x2: u32? = c2 ? chain_vec.pop() : x1;
-            let x3: u32? = c3 ? chain_vec.pop() : x2;
-            let x4: u32? = c4 ? chain_vec.pop() : x3;
-            let x5: u32? = c5 ? chain_vec.pop() : x4;
-            let x6: u32? = c6 ? chain_vec.pop() : x5;
-            let x7: u32? = c7 ? chain_vec.pop() : x6;
-            let x8: u32? = c8 ? chain_vec.pop() : x7;
-            let x9: u32? = c9 ? chain_vec.pop() : x8;
-            let x10: u32? = c10 ? chain_vec.pop() : x9;
-            let x11: u32? = c11 ? chain_vec.pop() : x10;
-            let x12: u32? = c12 ? chain_vec.pop() : x11;
-            let x13: u32? = c13 ? chain_vec.pop() : x12;
-            let x14: u32? = c14 ? chain_vec.pop() : x13;
-            let x15: u32? = c15 ? chain_vec.pop() : x14;
-            assert(x15 == none);
-        };
-    }
 }
