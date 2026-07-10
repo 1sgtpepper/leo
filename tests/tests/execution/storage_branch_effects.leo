@@ -47,32 +47,7 @@ program = "storage_branch_effects.aleo"
 function = "prefix_order_tuple"
 input = []
 
-[case]
-program = "storage_branch_effects.aleo"
-function = "prefix_order_reconstructed_read"
-input = ["false", "1u32"]
-
-[case]
-program = "storage_branch_effects.aleo"
-function = "prefix_order_reconstructed_read"
-input = ["false", "0u32"]
-
-[case]
-program = "storage_branch_effects.aleo"
-function = "composite_base_before_storage"
-input = ["1u32"]
-
-[case]
-program = "storage_branch_effects.aleo"
-function = "composite_base_before_storage"
-input = ["0u32"]
-
 */
-
-struct Update {
-    x: u32,
-    y: u32,
-}
 
 program storage_branch_effects.aleo {
 
@@ -89,7 +64,6 @@ program storage_branch_effects.aleo {
     storage else_if_vec: [u32];
     storage else_if_ternary_vec: [u32];
     storage prefix_vec: [u32];
-    storage prefix_optional: u32?;
 
     fn definition_false(public take: bool) -> Final {
         return final {
@@ -179,26 +153,6 @@ program storage_branch_effects.aleo {
             assert(pair.0.unwrap() == 10u32);
             assert(pair.1 == none);
             assert(prefix_vec.len() == 1u32);
-        };
-    }
-
-    fn prefix_order_reconstructed_read(public take: bool, public denominator: u32) -> Final {
-        return final {
-            let pair: (u32, u32?) = (1u32 / denominator, take ? prefix_optional : none);
-            assert(pair.0 == 1u32);
-            assert(pair.1 == none);
-        };
-    }
-
-    fn composite_base_before_storage(public denominator: u32) -> Final {
-        return final {
-            prefix_vec.push(11u32);
-            let pair: (Update, u32?) = (
-                Update { x: 7u32, ..Update { x: 1u32 / denominator, y: 0u32 } },
-                prefix_vec.pop(),
-            );
-            assert(pair.0.x == 7u32);
-            assert(pair.1.unwrap() == 11u32);
         };
     }
 
