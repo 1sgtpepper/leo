@@ -51,4 +51,23 @@ program singleton_storage.aleo {
     fn push_fallible_value(public x: u32) -> Final {
         return final { nums.push(1u32 / x); };
     }
+
+    fn set_fallible_index(public x: u32) -> Final {
+        return final { nums.set(1u32 / x, 7u32); };
+    }
+
+    fn set_fallible_value(public x: u32) -> Final {
+        return final { nums.set(0u32, 1u32 / x); };
+    }
+
+    fn set_current_len() -> Final {
+        return final { nums.set(0u32, nums.len()); };
+    }
+
+    fn swap_remove_fallible_index(public x: u32) -> Final {
+        return final {
+            let removed = nums.swap_remove(1u32 / x);
+            assert(removed >= 0u32);
+        };
+    }
 }

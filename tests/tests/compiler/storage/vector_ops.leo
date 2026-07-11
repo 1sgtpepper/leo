@@ -2,6 +2,7 @@ program singleton_storage.aleo {
     storage counter: u8;
 
     storage vec: [u8];
+    storage nums: [u32];
 
     fn push() -> Final {
         return final { vec.push(42u8); };
@@ -33,6 +34,25 @@ program singleton_storage.aleo {
         return final {
             let x = vec.swap_remove(3u32);
             assert(x >= 0);
+        };
+    }
+
+    fn set_fallible_index(public x: u32) -> Final {
+        return final { nums.set(1u32 / x, 7u32); };
+    }
+
+    fn set_fallible_value(public x: u32) -> Final {
+        return final { nums.set(0u32, 1u32 / x); };
+    }
+
+    fn set_current_len() -> Final {
+        return final { nums.set(0u32, nums.len()); };
+    }
+
+    fn swap_remove_fallible_index(public x: u32) -> Final {
+        return final {
+            let removed = nums.swap_remove(1u32 / x);
+            assert(removed >= 0u32);
         };
     }
 

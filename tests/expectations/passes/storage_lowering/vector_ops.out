@@ -95,5 +95,41 @@ program singleton_storage.aleo {
             _mapping_set(singleton_storage.aleo::nums__, $len_var$19, $push_value$18);
         };
     }
+    fn set_fallible_index(public x: u32) -> Final<Fn()> {
+        return async {
+            let $eval$20 = 1u32 / x;
+            let $len_var$21 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            assert($eval$20 < $len_var$21);
+            _mapping_set(singleton_storage.aleo::nums__, $eval$20, 7u32);
+        };
+    }
+    fn set_fallible_value(public x: u32) -> Final<Fn()> {
+        return async {
+            let $eval$22 = 1u32 / x;
+            let $len_var$23 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            assert(0u32 < $len_var$23);
+            _mapping_set(singleton_storage.aleo::nums__, 0u32, $eval$22);
+        };
+    }
+    fn set_current_len() -> Final<Fn()> {
+        return async {
+            let $eval$24 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            let $len_var$25 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            assert(0u32 < $len_var$25);
+            _mapping_set(singleton_storage.aleo::nums__, 0u32, $eval$24);
+        };
+    }
+    fn swap_remove_fallible_index(public x: u32) -> Final<Fn()> {
+        return async {
+            let $eval$26 = 1u32 / x;
+            let $len_var$27 = _mapping_get_or_use(singleton_storage.aleo::nums__len__, false, 0u32);
+            assert($eval$26 < $len_var$27);
+            let $removed$28 = _mapping_get(singleton_storage.aleo::nums__, $eval$26);
+            _mapping_set(singleton_storage.aleo::nums__, $eval$26, _mapping_get(singleton_storage.aleo::nums__, $len_var$27 - 1u32));
+            _mapping_set(singleton_storage.aleo::nums__len__, false, $len_var$27 - 1u32);
+            let removed = $removed$28;
+            assert(removed >= 0u32);
+        };
+    }
 }
 

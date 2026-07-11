@@ -1808,19 +1808,27 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     panic!("Vector::set can only be called with `Expression::Path`");
                 };
 
-                // Reconstruct key/index and value
-                let (reconstructed_key_expr, key_stmts) =
+                // Reconstruct key/index and value. Bind required residual evaluations in
+                // source order before the vector operation's synthesized storage work.
+                let (reconstructed_key_expr, mut key_stmts) =
                     self.reconstruct_expression(index_expr.clone(), &Default::default());
-                let (reconstructed_value_expr, value_stmts) =
+                let reconstructed_key_expr =
+                    self.materialize_strict_prefix_expression(reconstructed_key_expr, &mut key_stmts);
+
+                let (reconstructed_value_expr, mut value_stmts) =
                     self.reconstruct_expression(value_expr.clone(), &Default::default());
+                let reconstructed_value_expr =
+                    self.materialize_strict_prefix_expression(reconstructed_value_expr, &mut value_stmts);
 
                 // Input:
                 //   Set(v, index, value)
                 //
                 // Lowered reconstruction (conceptually):
+                //   let $index = index; // if the residual index cannot be discarded
+                //   let $set_value = value; // if the residual value cannot be discarded
                 //   let $len_var = Mapping::get_or_use(len_map, false, 0u32);
-                //   assert(index < $len_var);
-                //   Mapping::set(vec_map, index, value);
+                //   assert((index or $index) < $len_var);
+                //   Mapping::set(vec_map, index or $index, value or $set_value);
                 let (vec_path_expr, len_path_expr) = self.generate_vector_mapping_exprs(path_to_vector);
 
                 // let $len_var = Mapping::get_or_use(len_map, false, 0u32)
@@ -1906,18 +1914,22 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
                     panic!("Vector::swap_remove can only be called with `Expression::Path`");
                 };
 
-                // Reconstruct index
-                let (reconstructed_index_expr, index_stmts) =
+                // Reconstruct the index and bind a required residual evaluation once
+                // before the vector operation's synthesized storage work.
+                let (reconstructed_index_expr, mut index_stmts) =
                     self.reconstruct_expression(index_expr.clone(), &Default::default());
+                let reconstructed_index_expr =
+                    self.materialize_strict_prefix_expression(reconstructed_index_expr, &mut index_stmts);
 
                 // Input:
                 //   Vector::swap_remove(v, index)
                 //
                 // Lowered reconstruction (conceptually):
+                //   let $index = index; // if the residual index cannot be discarded
                 //   let $len_var = Mapping::get_or_use(len_map, false, 0u32);
-                //   assert(index < $len_var);
-                //   let $removed = Mapping::get(vec_map, index);
-                //   Mapping::set(vec_map, index, Mapping::get(vec_map, $len_var - 1));
+                //   assert((index or $index) < $len_var);
+                //   let $removed = Mapping::get(vec_map, index or $index);
+                //   Mapping::set(vec_map, index or $index, Mapping::get(vec_map, $len_var - 1));
                 //   Mapping::set(len_map, false, $len_var - 1);
                 //   $removed
                 let (vec_path_expr, len_path_expr) = self.generate_vector_mapping_exprs(path_to_vector);

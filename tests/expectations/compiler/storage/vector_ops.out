@@ -16,6 +16,14 @@ mapping vec__len__:
     key as boolean.public;
     value as u32.public;
 
+mapping nums__:
+    key as u32.public;
+    value as u32.public;
+
+mapping nums__len__:
+    key as boolean.public;
+    value as u32.public;
+
 function push:
     async push into r0;
     output r0 as singleton_storage.aleo/push.future;
@@ -103,6 +111,62 @@ finalize swap_remove:
     set r3 into vec__len__[false];
     gte r2 0u8 into r5;
     assert.eq r5 true;
+
+function set_fallible_index:
+    input r0 as u32.public;
+    async set_fallible_index r0 into r1;
+    output r1 as singleton_storage.aleo/set_fallible_index.future;
+
+finalize set_fallible_index:
+    input r0 as u32.public;
+    div 1u32 r0 into r1;
+    get.or_use nums__len__[false] 0u32 into r2;
+    lt r1 r2 into r3;
+    assert.eq r3 true;
+    set 7u32 into nums__[r1];
+
+function set_fallible_value:
+    input r0 as u32.public;
+    async set_fallible_value r0 into r1;
+    output r1 as singleton_storage.aleo/set_fallible_value.future;
+
+finalize set_fallible_value:
+    input r0 as u32.public;
+    div 1u32 r0 into r1;
+    get.or_use nums__len__[false] 0u32 into r2;
+    lt 0u32 r2 into r3;
+    assert.eq r3 true;
+    set r1 into nums__[0u32];
+
+function set_current_len:
+    async set_current_len into r0;
+    output r0 as singleton_storage.aleo/set_current_len.future;
+
+finalize set_current_len:
+    get.or_use nums__len__[false] 0u32 into r0;
+    get.or_use nums__len__[false] 0u32 into r1;
+    lt 0u32 r1 into r2;
+    assert.eq r2 true;
+    set r0 into nums__[0u32];
+
+function swap_remove_fallible_index:
+    input r0 as u32.public;
+    async swap_remove_fallible_index r0 into r1;
+    output r1 as singleton_storage.aleo/swap_remove_fallible_index.future;
+
+finalize swap_remove_fallible_index:
+    input r0 as u32.public;
+    div 1u32 r0 into r1;
+    get.or_use nums__len__[false] 0u32 into r2;
+    lt r1 r2 into r3;
+    assert.eq r3 true;
+    get nums__[r1] into r4;
+    sub r2 1u32 into r5;
+    get nums__[r5] into r6;
+    set r6 into nums__[r1];
+    set r5 into nums__len__[false];
+    gte r4 0u32 into r7;
+    assert.eq r7 true;
 
 constructor:
     assert.eq edition 0u16;
