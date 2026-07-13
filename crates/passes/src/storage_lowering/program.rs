@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Leo library. If not, see <https://www.gnu.org/licenses/>.
 
-use super::StorageLoweringVisitor;
+use super::{LoweringContext, StorageLoweringVisitor};
 use leo_ast::{
     AstReconstructor,
     Identifier,
@@ -75,6 +75,19 @@ impl UnitReconstructor for StorageLoweringVisitor<'_> {
                 .map(|(Location { program, .. }, mapping)| (*program, mapping.clone())),
         );
 
+        let functions = input
+            .functions
+            .into_iter()
+            .map(|(id, function)| {
+                let context = LoweringContext::from(function.variant);
+                let function = self.in_lowering_context(context, |slf| slf.reconstruct_function(function));
+                (id, function)
+            })
+            .collect();
+        let constructor = input.constructor.map(|constructor| {
+            self.in_lowering_context(LoweringContext::Constructor, |slf| slf.reconstruct_constructor(constructor))
+        });
+
         ProgramScope {
             program_id: input.program_id,
             parents: input.parents.into_iter().map(|(s, t)| (s, self.reconstruct_type(t).0)).collect(),
@@ -89,9 +102,9 @@ impl UnitReconstructor for StorageLoweringVisitor<'_> {
             composites: input.composites.into_iter().map(|(i, c)| (i, self.reconstruct_composite(c))).collect(),
             mappings,
             storage_variables,
-            functions: input.functions.into_iter().map(|(i, f)| (i, self.reconstruct_function(f))).collect(),
+            functions,
             interfaces: input.interfaces.into_iter().map(|(i, int)| (i, self.reconstruct_interface(int))).collect(),
-            constructor: input.constructor.map(|c| self.reconstruct_constructor(c)),
+            constructor,
             span: input.span,
         }
     }

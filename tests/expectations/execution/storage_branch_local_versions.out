@@ -1,0 +1,168 @@
+program storage_branch_local_versions.aleo;
+
+struct Pair:
+    x as u32;
+    y as u32;
+
+struct Nested:
+    pair as Pair;
+    values as [u32; 2u32];
+
+struct Optional__JzunLORyB8U:
+    is_some as boolean;
+    val as u32;
+
+mapping values__:
+    key as u32.public;
+    value as u32.public;
+
+mapping values__len__:
+    key as boolean.public;
+    value as u32.public;
+
+function run:
+    input r0 as boolean.public;
+    async run r0 into r1;
+    output r1 as storage_branch_local_versions.aleo/run.future;
+
+finalize run:
+    input r0 as boolean.public;
+    set 0u32 into values__len__[false];
+    get.or_use values__len__[false] 0u32 into r1;
+    add r1 1u32 into r2;
+    set r2 into values__len__[false];
+    set 9u32 into values__[r1];
+    cast 1u32 2u32 into r3 as Pair;
+    cast 7u32 8u32 into r4 as Pair;
+    cast 9u32 10u32 into r5 as [u32; 2u32];
+    cast r4 r5 into r6 as Nested;
+    branch.eq r0 false to end_then_0_0;
+    get.or_use values__len__[false] 0u32 into r7;
+    gt r7 0u32 into r8;
+    sub.w r7 1u32 into r9;
+    ternary r8 r9 r7 into r10;
+    set r10 into values__len__[false];
+    branch.eq r8 false to end_then_1_2;
+    get.or_use values__[r9] 0u32 into r11;
+    cast true r11 into r12 as Optional__JzunLORyB8U;
+    add r3.x 2u32 into r13;
+    cast r6.pair.x r6.pair.y into r14 as Pair;
+    add r14.y 5u32 into r15;
+    cast r6.values[0u32] r6.values[1u32] into r16 as [u32; 2u32];
+    add r16[0u32] 6u32 into r17;
+    cast false 0u32 into r18 as Optional__JzunLORyB8U;
+    is.neq r12 r18 into r19;
+    assert.eq r19 true;
+    is.eq r13 3u32 into r20;
+    assert.eq r20 true;
+    cast r6.pair.x r15 into r21 as Pair;
+    is.eq r21.y 13u32 into r22;
+    assert.eq r22 true;
+    cast r17 r6.values[1u32] into r23 as [u32; 2u32];
+    is.eq r23[0u32] 15u32 into r24;
+    assert.eq r24 true;
+    branch.eq true true to end_otherwise_1_3;
+    position end_then_1_2;
+    cast false 0u32 into r25 as Optional__JzunLORyB8U;
+    add r3.x 2u32 into r26;
+    cast r6.pair.x r6.pair.y into r27 as Pair;
+    add r27.y 5u32 into r28;
+    cast r6.values[0u32] r6.values[1u32] into r29 as [u32; 2u32];
+    add r29[0u32] 6u32 into r30;
+    cast false 0u32 into r31 as Optional__JzunLORyB8U;
+    is.neq r25 r31 into r32;
+    assert.eq r32 true;
+    is.eq r26 3u32 into r33;
+    assert.eq r33 true;
+    cast r6.pair.x r28 into r34 as Pair;
+    is.eq r34.y 13u32 into r35;
+    assert.eq r35 true;
+    cast r30 r6.values[1u32] into r36 as [u32; 2u32];
+    is.eq r36[0u32] 15u32 into r37;
+    assert.eq r37 true;
+    position end_otherwise_1_3;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u32 into r38 as Optional__JzunLORyB8U;
+    add r3.x 2u32 into r39;
+    cast r6.pair.x r6.pair.y into r40 as Pair;
+    add r40.y 5u32 into r41;
+    cast r6.values[0u32] r6.values[1u32] into r42 as [u32; 2u32];
+    add r42[0u32] 6u32 into r43;
+    cast false 0u32 into r44 as Optional__JzunLORyB8U;
+    is.eq r38 r44 into r45;
+    assert.eq r45 true;
+    is.eq r39 3u32 into r46;
+    assert.eq r46 true;
+    cast r6.pair.x r41 into r47 as Pair;
+    is.eq r47.y 13u32 into r48;
+    assert.eq r48 true;
+    cast r43 r6.values[1u32] into r49 as [u32; 2u32];
+    is.eq r49[0u32] 15u32 into r50;
+    assert.eq r50 true;
+    position end_otherwise_0_1;
+    get.or_use values__len__[false] 0u32 into r51;
+    ternary r0 0u32 1u32 into r52;
+    is.eq r51 r52 into r53;
+    assert.eq r53 true;
+
+constructor:
+    assert.eq edition 0u16;
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au1vcqzwty4qxjuw5nxwkh5ddx45jerj5ccrxpnahdut25vc7sdpu9skqkqqx",
+      "program": "storage_branch_local_versions.aleo",
+      "function": "run",
+      "inputs": [
+        {
+          "type": "public",
+          "id": "5439341787876448163622750548619929519408470146146528981700377851862723239791field",
+          "value": "false"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "947719070513652377532127557121205352164361796764020351596665305475038445648field",
+          "value": "{\n  program_id: storage_branch_local_versions.aleo,\n  function_name: run,\n  arguments: [\n    false\n  ]\n}"
+        }
+      ],
+      "tpk": "932902105444239517980596565691908870668917795454138192289088332646102103453group",
+      "tcm": "4534045528378062984919568849257618109414740950022974037600860386185923697801field",
+      "scm": "919245366506739687912770902847963156737622134026017456623407014687413152843field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au18pnaw5n2py0jsd8c3qfgn0t32whwystv228ppvraye2kd6dpuu9q0226tj",
+      "program": "storage_branch_local_versions.aleo",
+      "function": "run",
+      "inputs": [
+        {
+          "type": "public",
+          "id": "3840078471638576426245030404610159369041706844543242436163147089806993201461field",
+          "value": "true"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "3683301639230005683192993832728266860005729622302637585174133223144995778155field",
+          "value": "{\n  program_id: storage_branch_local_versions.aleo,\n  function_name: run,\n  arguments: [\n    true\n  ]\n}"
+        }
+      ],
+      "tpk": "4435182414136183130262225239916202916754973933386625330210643288715243337617group",
+      "tcm": "850142209754567944166319722250339409916042600529796761178314418357457776240field",
+      "scm": "6880818639492575671344261738303779886148232533224264415621330306086981058639field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}

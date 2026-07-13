@@ -1,0 +1,141 @@
+program branch_final_fn.aleo;
+
+struct Optional__JzunLORyB8U:
+    is_some as boolean;
+    val as u32;
+
+mapping audit:
+    key as boolean.public;
+    value as u32.public;
+
+mapping values__:
+    key as u32.public;
+    value as u32.public;
+
+mapping values__len__:
+    key as boolean.public;
+    value as u32.public;
+
+function run:
+    input r0 as boolean.public;
+    async run r0 into r1;
+    output r1 as branch_final_fn.aleo/run.future;
+
+finalize run:
+    input r0 as boolean.public;
+    set 0u32 into values__len__[false];
+    get.or_use values__len__[false] 0u32 into r1;
+    add r1 1u32 into r2;
+    set r2 into values__len__[false];
+    set 9u32 into values__[r1];
+    branch.eq r0 false to end_then_0_0;
+    get.or_use values__len__[false] 0u32 into r3;
+    gt r3 0u32 into r4;
+    sub.w r3 1u32 into r5;
+    ternary r4 r5 r3 into r6;
+    set r6 into values__len__[false];
+    branch.eq r4 false to end_then_1_2;
+    get.or_use values__[r5] 0u32 into r7;
+    cast true r7 into r8 as Optional__JzunLORyB8U;
+    cast true 9u32 into r9 as Optional__JzunLORyB8U;
+    not r0 into r10;
+    is.eq r8 r9 into r11;
+    or r10 r11 into r12;
+    assert.eq r12 true;
+    cast false 0u32 into r13 as Optional__JzunLORyB8U;
+    is.eq r8 r13 into r14;
+    or r0 r14 into r15;
+    assert.eq r15 true;
+    branch.eq true true to end_otherwise_1_3;
+    position end_then_1_2;
+    cast false 0u32 into r16 as Optional__JzunLORyB8U;
+    cast true 9u32 into r17 as Optional__JzunLORyB8U;
+    not r0 into r18;
+    is.eq r16 r17 into r19;
+    or r18 r19 into r20;
+    assert.eq r20 true;
+    cast false 0u32 into r21 as Optional__JzunLORyB8U;
+    is.eq r16 r21 into r22;
+    or r0 r22 into r23;
+    assert.eq r23 true;
+    position end_otherwise_1_3;
+    branch.eq true true to end_otherwise_0_1;
+    position end_then_0_0;
+    cast false 0u32 into r24 as Optional__JzunLORyB8U;
+    cast true 9u32 into r25 as Optional__JzunLORyB8U;
+    not r0 into r26;
+    is.eq r24 r25 into r27;
+    or r26 r27 into r28;
+    assert.eq r28 true;
+    cast false 0u32 into r29 as Optional__JzunLORyB8U;
+    is.eq r24 r29 into r30;
+    or r0 r30 into r31;
+    assert.eq r31 true;
+    position end_otherwise_0_1;
+    get.or_use values__len__[false] 0u32 into r32;
+    set r32 into audit[false];
+    get.or_use values__len__[false] 0u32 into r33;
+    ternary r0 0u32 1u32 into r34;
+    is.eq r33 r34 into r35;
+    assert.eq r35 true;
+
+constructor:
+    assert.eq edition 0u16;
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au1dswjsfpk5dduykkrh8uke8sgdl6qugu05wks48enatetv8n65y8qdujyl7",
+      "program": "branch_final_fn.aleo",
+      "function": "run",
+      "inputs": [
+        {
+          "type": "public",
+          "id": "8424877559222241031835429266960857970209886970108308792290108019626798762687field",
+          "value": "false"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "4064651012142825468878274440404194793545377299407402599346960065646002743280field",
+          "value": "{\n  program_id: branch_final_fn.aleo,\n  function_name: run,\n  arguments: [\n    false\n  ]\n}"
+        }
+      ],
+      "tpk": "932902105444239517980596565691908870668917795454138192289088332646102103453group",
+      "tcm": "4534045528378062984919568849257618109414740950022974037600860386185923697801field",
+      "scm": "919245366506739687912770902847963156737622134026017456623407014687413152843field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au1r5a0wjvxdglfyrxn8um8gwf55s9rfl7wukgytfae5tcgs5lec5qqjas6ss",
+      "program": "branch_final_fn.aleo",
+      "function": "run",
+      "inputs": [
+        {
+          "type": "public",
+          "id": "5992241429301640850081789882347444057238546682863359013511452271298556870239field",
+          "value": "true"
+        }
+      ],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "1642074495038632111415850052178692279490072410612394570704475019973459942341field",
+          "value": "{\n  program_id: branch_final_fn.aleo,\n  function_name: run,\n  arguments: [\n    true\n  ]\n}"
+        }
+      ],
+      "tpk": "4435182414136183130262225239916202916754973933386625330210643288715243337617group",
+      "tcm": "850142209754567944166319722250339409916042600529796761178314418357457776240field",
+      "scm": "6880818639492575671344261738303779886148232533224264415621330306086981058639field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}

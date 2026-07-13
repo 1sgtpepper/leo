@@ -120,6 +120,9 @@ use indexmap::IndexMap;
 
 mod ast;
 
+mod join;
+use join::{JoinMaterializationCost, JoinPlan, LexicalEnvironment, LoweringContext, contains_local_vector_join_op};
+
 mod program;
 
 mod visitor;
@@ -135,7 +138,13 @@ impl Pass for StorageLowering {
 
     fn do_pass(input: TypeCheckingInput, state: &mut crate::CompilerState) -> Result<Self::Output> {
         let ast = std::mem::take(&mut state.ast);
-        let mut visitor = StorageLoweringVisitor { state, program: Symbol::intern(""), new_mappings: IndexMap::new() };
+        let mut visitor = StorageLoweringVisitor {
+            state,
+            program: Symbol::intern(""),
+            new_mappings: IndexMap::new(),
+            context: LoweringContext::Other,
+            lexical_environment: LexicalEnvironment::default(),
+        };
 
         let ast = ast.map(
             |program| visitor.reconstruct_program(program),

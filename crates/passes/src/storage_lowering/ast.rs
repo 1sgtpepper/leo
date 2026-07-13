@@ -14,7 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with the Leo library. If not, see <https://www.gnu.org/licenses/>.
 
-use super::StorageLoweringVisitor;
+use super::{
+    JoinMaterializationCost,
+    JoinPlan,
+    LoweringContext,
+    StorageLoweringVisitor,
+    contains_local_vector_join_op,
+};
 use crate::{SymbolAccessCollector, expression_can_be_discarded};
 
 use leo_ast::*;
@@ -35,6 +41,17 @@ impl StorageLoweringVisitor<'_> {
         {
             self.state.type_table.insert(to, type_);
         }
+    }
+
+    fn is_local_vector_join_candidate(&self, expression: &Expression) -> bool {
+        if self.context != LoweringContext::Finalize {
+            return false;
+        }
+        let Expression::Ternary(input) = expression else {
+            return false;
+        };
+        contains_local_vector_join_op(&input.if_true, self.program)
+            || contains_local_vector_join_op(&input.if_false, self.program)
     }
 
     /// Lower `expression` in a context that consumes its value.
@@ -1010,9 +1027,11 @@ impl StorageLoweringVisitor<'_> {
                 return reconstructed;
             }
 
+            let source_statement = statement.clone();
             let (statement, additional_statements) = self.reconstruct_statement(statement);
             reconstructed.extend(additional_statements);
             reconstructed.push(statement);
+            self.lexical_environment.observe_statement(&source_statement);
         }
 
         reconstructed
@@ -1136,7 +1155,99 @@ impl StorageLoweringVisitor<'_> {
         statements
     }
 
+    fn try_reconstruct_local_vector_join(
+        &mut self,
+        input: &DefinitionStatement,
+        tail: &[Statement],
+    ) -> Option<Vec<Statement>> {
+        if !self.is_local_vector_join_candidate(&input.value) {
+            return None;
+        }
+        let DefinitionPlace::Single(identifier) = input.place else {
+            return None;
+        };
+        let parameter_type = input.type_.clone().or_else(|| self.state.type_table.get(&input.value.id()))?;
+        let plan = JoinPlan::build(&mut self.lexical_environment, identifier, parameter_type, tail)?;
+
+        // This materializer requires one linear dependent prefix. A nested selected
+        // region retains the existing lowering path rather than using an incomplete
+        // lexical value map.
+        if plan.has_branching_prefix(|statement| self.statement_requires_tail_cps(statement)) {
+            return None;
+        }
+
+        Some(self.materialize_local_vector_join(input.clone(), plan))
+    }
+
+    fn reconstruct_linear_join_prefix(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
+        let mut output = Vec::new();
+        for statement in statements {
+            debug_assert!(!self.statement_requires_tail_cps(&statement));
+            let (statement, additional) = self.reconstruct_statement(statement);
+            output.extend(additional);
+            output.push(statement);
+        }
+        output
+    }
+
+    fn materialize_local_vector_join(&mut self, input: DefinitionStatement, plan: JoinPlan) -> Vec<Statement> {
+        let DefinitionPlace::Single(source_identifier) = input.place else {
+            unreachable!("a local vector join must bind one parameter")
+        };
+        let parameter_type = input
+            .type_
+            .clone()
+            .or_else(|| self.state.type_table.get(&input.value.id()))
+            .expect("type checking must assign a type to a StorageLowering join parameter");
+        let span = input.span;
+        let plan = Rc::new(plan);
+        let arm_plan = plan.clone();
+        let selected_region = self.emit_expression_with_continuation(
+            input.value,
+            Rc::new(move |value, this| {
+                let actual_type = this
+                    .expression_type_for_materialization(&value)
+                    .expect("a StorageLowering join argument must have a type");
+                arm_plan.validate_arm(source_identifier.name, &actual_type);
+
+                let parameter = Identifier {
+                    name: source_identifier.name,
+                    span: source_identifier.span,
+                    id: this.state.node_builder.next_id(),
+                };
+                this.state.type_table.insert(parameter.id, parameter_type.clone());
+                let mut statements = vec![
+                    DefinitionStatement {
+                        place: DefinitionPlace::Single(parameter),
+                        type_: Some(parameter_type.clone()),
+                        value,
+                        span,
+                        id: this.state.node_builder.next_id(),
+                    }
+                    .into(),
+                ];
+
+                let prefix = arm_plan.versioned_prefix(this.state);
+                statements.extend(this.reconstruct_linear_join_prefix(prefix));
+                statements
+            }),
+        );
+        let shared_suffix = self.reconstruct_block_statements(plan.shared_suffix().to_vec());
+        let cost = JoinMaterializationCost::from_materialized(&selected_region, &shared_suffix)
+            .expect("a materialized StorageLowering join statement count cannot overflow usize");
+        debug_assert!(cost.statement_nodes >= cost.top_level_statements);
+
+        let mut statements = Vec::with_capacity(cost.top_level_statements);
+        statements.extend(selected_region);
+        statements.extend(shared_suffix);
+        statements
+    }
+
     fn reconstruct_definition_with_tail(&mut self, input: DefinitionStatement, tail: &[Statement]) -> Vec<Statement> {
+        if let Some(statements) = self.try_reconstruct_local_vector_join(&input, tail) {
+            return statements;
+        }
+
         let type_ = input.type_.clone().map(|type_| self.reconstruct_type(type_).0);
         let tail = tail.to_vec();
 
@@ -2420,7 +2531,10 @@ impl leo_ast::AstReconstructor for StorageLoweringVisitor<'_> {
     }
 
     fn reconstruct_block(&mut self, block: Block) -> (Block, Self::AdditionalOutput) {
+        let source_scope = block.id;
+        self.lexical_environment.enter_scope(source_scope);
         let statements = self.reconstruct_block_statements(block.statements);
+        self.lexical_environment.exit_scope(source_scope);
 
         (Block { span: block.span, statements, id: self.state.node_builder.next_id() }, Default::default())
     }

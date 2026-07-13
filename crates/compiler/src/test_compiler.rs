@@ -230,6 +230,30 @@ fn test_compiler() {
     leo_test_framework::run_tests("compiler", runner);
 }
 
+#[test]
+#[serial]
+fn storage_branch_outer_assignment_compiles() {
+    let source = include_str!("../../../tests/tests/execution/storage_branch_outer_assignment.leo");
+    let output = run_with_stub(StubType::FromLeo, source);
+    assert!(!output.contains("Error"), "{output}");
+}
+
+#[test]
+#[serial]
+fn storage_branch_dependent_assignment_compiles() {
+    let source = include_str!("../../../tests/tests/execution/storage_branch_dependent_assignment.leo");
+    let output = run_with_stub(StubType::FromLeo, source);
+    assert!(!output.contains("Error"), "{output}");
+}
+
+#[test]
+#[serial]
+fn storage_branch_local_versions_compile() {
+    let source = include_str!("../../../tests/tests/execution/storage_branch_local_versions.leo");
+    let output = run_with_stub(StubType::FromLeo, source);
+    assert!(!output.contains("Error"), "{output}");
+}
+
 // ---------------------------------------------------------------------------
 // Interface ABI tests
 // ---------------------------------------------------------------------------

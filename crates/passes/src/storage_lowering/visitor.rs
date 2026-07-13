@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with the Leo library. If not, see <https://www.gnu.org/licenses/>.
 
+use super::{LexicalEnvironment, LoweringContext};
 use crate::{CompilerState, expression_can_be_discarded};
 
 use leo_ast::*;
@@ -26,9 +27,18 @@ pub struct StorageLoweringVisitor<'a> {
     // The name of the current program scope
     pub program: Symbol,
     pub new_mappings: IndexMap<Location, Mapping>,
+    pub(super) context: LoweringContext,
+    pub(super) lexical_environment: LexicalEnvironment,
 }
 
 impl StorageLoweringVisitor<'_> {
+    pub(super) fn in_lowering_context<T>(&mut self, context: LoweringContext, func: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = core::mem::replace(&mut self.context, context);
+        let result = func(self);
+        self.context = previous;
+        result
+    }
+
     pub(super) fn expression_type_for_materialization(&self, expression: &Expression) -> Option<Type> {
         if let Some(type_) = self.state.type_table.get(&expression.id()) {
             return Some(type_);

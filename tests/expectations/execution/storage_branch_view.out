@@ -1,0 +1,32 @@
+program branch_view.aleo;
+
+mapping values__:
+    key as u32.public;
+    value as u32.public;
+
+mapping values__len__:
+    key as boolean.public;
+    value as u32.public;
+
+function dummy:
+    input r0 as u32.private;
+    output r0 as u32.private;
+
+view read_or_divide:
+    input r0 as boolean.public;
+    input r1 as u32.public;
+    get.or_use values__len__[false] 0u32 into r2;
+    div 10u32 r1 into r3;
+    ternary r0 r2 r3 into r4;
+    output r4 as u32.public;
+
+constructor:
+    assert.eq edition 0u16;
+status: failed: Failed to finalize 'branch_view.aleo/read_or_divide' command (div 10u32 r1 into r3;) at index 1: 'read_or_divide' failed to evaluate command
+output: ()
+status: success
+output: 3u32
+status: success
+output: 5u32
+status: failed: Failed to finalize 'branch_view.aleo/read_or_divide' command (div 10u32 r1 into r3;) at index 1: 'read_or_divide' failed to evaluate command
+output: ()
