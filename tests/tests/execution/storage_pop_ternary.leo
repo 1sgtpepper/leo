@@ -60,7 +60,16 @@ input = ["false"]
 program = "storage_pop_ternary.aleo"
 function = "condition_uses_pre_pop_len"
 input = []
+
+[case]
+program = "storage_pop_ternary.aleo"
+function = "indirect_unselected"
+input = ["false"]
 */
+
+export final fn pop_indirect() -> u32? {
+    return indirect_values.pop();
+}
 
 program storage_pop_ternary.aleo {
     storage true_unselected: [u32];
@@ -75,6 +84,7 @@ program storage_pop_ternary.aleo {
     storage both_true_values: [u32];
     storage both_false_values: [u32];
     storage condition_once_values: [u32];
+    storage indirect_values: [u32];
 
     fn true_arm_unselected(public take: bool) -> Final {
         return final {
@@ -192,6 +202,15 @@ program storage_pop_ternary.aleo {
             assert(popped != none);
             assert(popped.unwrap() == 1u32);
             assert(condition_once_values.len() == 0u32);
+        };
+    }
+
+    fn indirect_unselected(public take: bool) -> Final {
+        return final {
+            indirect_values.push(14u32);
+            let popped: u32? = take ? pop_indirect() : none;
+            assert(popped == none);
+            assert(indirect_values.len() == 1u32);
         };
     }
 
