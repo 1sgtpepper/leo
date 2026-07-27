@@ -31,6 +31,12 @@ jobs:
           UPDATE_EXPECT: "1"
         run: cargo test --all --locked --features only_testnet -- test_compiler
 
+      - name: Generate destructuring expectation
+        env:
+          TEST_FILTER: destructuring/tuple_destructure.leo
+          UPDATE_EXPECT: "1"
+        run: cargo test --all --locked --features only_testnet -- destructuring_runner_test
+
       - name: Upload generated expectations
         uses: actions/upload-artifact@v4
         with:
@@ -38,3 +44,4 @@ jobs:
           path: |
             tests/expectations/execution/tuple_assert_neq.out
             tests/expectations/compiler/tuple/tuple_comparison.out
+            tests/expectations/passes/destructuring/tuple_destructure.out
