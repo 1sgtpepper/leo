@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - ci/generate-vector-index-evaluation
+      - ci/generate-effectful-vector-index
   workflow_dispatch:
 
 permissions:
