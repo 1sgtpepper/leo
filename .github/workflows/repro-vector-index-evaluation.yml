@@ -20,12 +20,12 @@ jobs:
       - name: Generate current execution evidence
         env:
           UPDATE_EXPECT: "1"
-        run: cargo test -p leo-compiler --locked --features only_testnet -- execution_vector_index_evaluation_semantics_leo
+        run: cargo test --all --locked --features only_testnet -- execution_vector_index_evaluation_semantics_leo
       - name: Verify a clean rerun
-        run: cargo test -p leo-compiler --locked --features only_testnet -- execution_vector_index_evaluation_semantics_leo
+        run: cargo test --all --locked --features only_testnet -- execution_vector_index_evaluation_semantics_leo
       - name: Publish observed output
         if: always()
-        run: sed -n '1,320p' tests/expectations/execution/vector_index_evaluation_semantics.out >> "$GITHUB_STEP_SUMMARY"
+        run: test -f tests/expectations/execution/vector_index_evaluation_semantics.out && sed -n '1,320p' tests/expectations/execution/vector_index_evaluation_semantics.out >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
