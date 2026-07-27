@@ -1,0 +1,49 @@
+program vector_index_evaluation_semantics.aleo {
+    @noupgrade
+    async constructor() {
+    }
+    mapping calls: u32 => u32;
+    mapping values__: u32 => u32;
+    mapping values__len__: bool => u32;
+    fn set_bound() -> Final<Fn()> {
+        return async {
+            let index: u32 = vector_index_evaluation_semantics.aleo::next_index();
+            let $len_var$0 = _mapping_get_or_use(vector_index_evaluation_semantics.aleo::values__len__, false, 0u32);
+            assert(index < $len_var$0);
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__, index, 99u32);
+        };
+    }
+    fn set_inline() -> Final<Fn()> {
+        return async {
+            let $len_var$1 = _mapping_get_or_use(vector_index_evaluation_semantics.aleo::values__len__, false, 0u32);
+            assert(vector_index_evaluation_semantics.aleo::next_index() < $len_var$1);
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__, vector_index_evaluation_semantics.aleo::next_index(), 99u32);
+        };
+    }
+    fn swap_remove_bound() -> Final<Fn()> {
+        return async {
+            let index: u32 = vector_index_evaluation_semantics.aleo::next_index();
+            let $len_var$2 = _mapping_get_or_use(vector_index_evaluation_semantics.aleo::values__len__, false, 0u32);
+            assert(index < $len_var$2);
+            let $removed$3 = _mapping_get(vector_index_evaluation_semantics.aleo::values__, index);
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__, index, _mapping_get(vector_index_evaluation_semantics.aleo::values__, $len_var$2 - 1u32));
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__len__, false, $len_var$2 - 1u32);
+            let removed: u32 = $removed$3;
+        };
+    }
+    fn swap_remove_inline() -> Final<Fn()> {
+        return async {
+            let $len_var$4 = _mapping_get_or_use(vector_index_evaluation_semantics.aleo::values__len__, false, 0u32);
+            assert(vector_index_evaluation_semantics.aleo::next_index() < $len_var$4);
+            let $removed$5 = _mapping_get(vector_index_evaluation_semantics.aleo::values__, vector_index_evaluation_semantics.aleo::next_index());
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__, vector_index_evaluation_semantics.aleo::next_index(), _mapping_get(vector_index_evaluation_semantics.aleo::values__, $len_var$4 - 1u32));
+            _mapping_set(vector_index_evaluation_semantics.aleo::values__len__, false, $len_var$4 - 1u32);
+            let removed: u32 = $removed$5;
+        };
+    }
+}
+    final fn next_index() -> u32 {
+        let count: u32 = _mapping_get_or_use(vector_index_evaluation_semantics.aleo::calls, 0u32, 0u32);
+        _mapping_set(vector_index_evaluation_semantics.aleo::calls, 0u32, count + 1u32);
+        return _chacha_rand_u32();
+}
