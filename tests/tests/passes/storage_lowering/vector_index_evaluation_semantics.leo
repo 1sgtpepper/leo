@@ -1,5 +1,5 @@
 // The index expression is one source call. Its mapping write and random draw
-// are observable, so lowering must materialize it before reusing it.
+// are observable after inlining, so storage lowering must not duplicate the call.
 program vector_index_evaluation_semantics.aleo {
     storage values: [u32];
     mapping calls: u32 => u32;
