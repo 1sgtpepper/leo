@@ -1,0 +1,32 @@
+name: Generate vector index expectation
+
+on:
+  push:
+    branches:
+      - ci/generate-vector-index-evaluation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  expectation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate expectation
+        env:
+          UPDATE_EXPECT: "1"
+          TEST_FILTER: vector_ops.leo
+        run: cargo test -p leo-passes --locked -- storage_lowering_runner_test
+      - name: Verify clean rerun
+        env:
+          TEST_FILTER: vector_ops.leo
+        run: cargo test -p leo-passes --locked -- storage_lowering_runner_test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vector-ops-expectation
+          path: tests/expectations/passes/storage_lowering/vector_ops.out
