@@ -1,0 +1,33 @@
+name: Tuple assert_neq repro
+
+on:
+  push:
+    branches:
+      - repro/tuple-assert-neq
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execution-repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate current execution evidence
+        env:
+          UPDATE_EXPECT: "1"
+        run: cargo test -p leo-compiler --locked --features only_testnet -- execution_tuple_assert_neq_semantics_leo
+      - name: Verify a clean rerun
+        run: cargo test -p leo-compiler --locked --features only_testnet -- execution_tuple_assert_neq_semantics_leo
+      - name: Publish observed output
+        if: always()
+        run: sed -n '1,260p' tests/expectations/execution/tuple_assert_neq_semantics.out >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tuple-assert-neq-repro
+          path: tests/expectations/execution/tuple_assert_neq_semantics.out
