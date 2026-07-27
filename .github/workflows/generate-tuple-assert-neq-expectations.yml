@@ -1,0 +1,40 @@
+name: Generate tuple assertion expectations
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/generate-tuple-assert-neq
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Generate execution expectation
+        run: UPDATE_EXPECT=1 cargo test --all --locked --features only_testnet -- execution_tuple_assert_neq_leo
+
+      - name: Generate compiler expectation
+        env:
+          TEST_FILTER: tuple/tuple_comparison.leo
+          UPDATE_EXPECT: "1"
+        run: cargo test --all --locked --features only_testnet -- test_compiler
+
+      - name: Upload generated expectations
+        uses: actions/upload-artifact@v4
+        with:
+          name: tuple-assert-neq-expectations
+          path: |
+            tests/expectations/execution/tuple_assert_neq.out
+            tests/expectations/compiler/tuple/tuple_comparison.out
