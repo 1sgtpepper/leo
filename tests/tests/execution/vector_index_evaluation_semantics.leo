@@ -73,7 +73,7 @@ program vector_index_evaluation_semantics.aleo {
     final fn next_index() -> u32 {
         let count: u32 = calls.get_or_use(0u32, 0u32);
         calls.set(0u32, count + 1u32);
-        return ChaCha::rand_u32() % 2u32;
+        return ChaCha::rand_u32() & 1u32;
     }
 
     @noupgrade
