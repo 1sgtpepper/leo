@@ -1,0 +1,129 @@
+program tuple_assert_neq_semantics.aleo;
+
+function binary_partial_difference:
+    async binary_partial_difference into r0;
+    output r0 as tuple_assert_neq_semantics.aleo/binary_partial_difference.future;
+
+finalize binary_partial_difference:
+    assert.eq true true;
+
+function assert_neq_partial_difference:
+    async assert_neq_partial_difference into r0;
+    output r0 as tuple_assert_neq_semantics.aleo/assert_neq_partial_difference.future;
+
+finalize assert_neq_partial_difference:
+    assert.neq 1u32 1u32;
+    assert.neq 2u32 3u32;
+
+function assert_neq_all_different:
+    async assert_neq_all_different into r0;
+    output r0 as tuple_assert_neq_semantics.aleo/assert_neq_all_different.future;
+
+finalize assert_neq_all_different:
+    assert.neq 1u32 3u32;
+    assert.neq 2u32 4u32;
+
+function assert_neq_equal:
+    async assert_neq_equal into r0;
+    output r0 as tuple_assert_neq_semantics.aleo/assert_neq_equal.future;
+
+finalize assert_neq_equal:
+    assert.neq 1u32 1u32;
+    assert.neq 2u32 2u32;
+
+constructor:
+    assert.eq edition 0u16;
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au1v3cmt52eqlqx7hwxmmsj9ts8t7zy7vt6wz32u778gcp633qn6sxssw9kgu",
+      "program": "tuple_assert_neq_semantics.aleo",
+      "function": "binary_partial_difference",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "8179602705320810004091585888085539324111427960448459259985725129975471680005field",
+          "value": "{\n  program_id: tuple_assert_neq_semantics.aleo,\n  function_name: binary_partial_difference,\n  arguments: []\n}"
+        }
+      ],
+      "tpk": "932902105444239517980596565691908870668917795454138192289088332646102103453group",
+      "tcm": "4534045528378062984919568849257618109414740950022974037600860386185923697801field",
+      "scm": "919245366506739687912770902847963156737622134026017456623407014687413152843field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
+verified: true
+status: rejected
+{
+  "transitions": [
+    {
+      "id": "au1qd9457r3mj4qe04xc7tnpfg8efa4ppepvuraj5czev68ff4mnyzqxecvk0",
+      "program": "tuple_assert_neq_semantics.aleo",
+      "function": "assert_neq_partial_difference",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "5022450423126821270303246142475815376781801007791055133608428317046636037968field",
+          "value": "{\n  program_id: tuple_assert_neq_semantics.aleo,\n  function_name: assert_neq_partial_difference,\n  arguments: []\n}"
+        }
+      ],
+      "tpk": "4435182414136183130262225239916202916754973933386625330210643288715243337617group",
+      "tcm": "850142209754567944166319722250339409916042600529796761178314418357457776240field",
+      "scm": "6880818639492575671344261738303779886148232533224264415621330306086981058639field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
+
+verified: true
+status: accepted
+{
+  "transitions": [
+    {
+      "id": "au1s4nl93uf2a0xshh3dff5lcrpdcnhcy5xjq3u8lysknmwmm2395zsqxv4vh",
+      "program": "tuple_assert_neq_semantics.aleo",
+      "function": "assert_neq_all_different",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "4104880795625115198992064282709839886808877391365790612095936474827504619800field",
+          "value": "{\n  program_id: tuple_assert_neq_semantics.aleo,\n  function_name: assert_neq_all_different,\n  arguments: []\n}"
+        }
+      ],
+      "tpk": "2522887999940374826698654126645535027810075514268095352773581615775304946572group",
+      "tcm": "1804215531425177261902248378301676324038494384555044966602196492783038681001field",
+      "scm": "3550506856681924294077270970505890072867776518575635158053618611174190675462field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
+
+verified: true
+status: rejected
+{
+  "transitions": [
+    {
+      "id": "au1faxfnmle6mxmrdm7ypwcf82wq6l9xvuygzp08x2a6vccvy0jlurspm9cle",
+      "program": "tuple_assert_neq_semantics.aleo",
+      "function": "assert_neq_equal",
+      "inputs": [],
+      "outputs": [
+        {
+          "type": "future",
+          "id": "5307001835082798371560045126483226652674054717819376772879495689308931442782field",
+          "value": "{\n  program_id: tuple_assert_neq_semantics.aleo,\n  function_name: assert_neq_equal,\n  arguments: []\n}"
+        }
+      ],
+      "tpk": "6060197335674172363144850410502281312781694387277365216513387164100734934168group",
+      "tcm": "1584660705981876771993043374418972780034313834621129725205833195234558363129field",
+      "scm": "3947453824222718726231568557530022093561558870139768932707177944233799344247field"
+    }
+  ],
+  "global_state_root": "sr1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gk0xu"
+}
