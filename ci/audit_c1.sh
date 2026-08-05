@@ -41,7 +41,7 @@ if run_case omitted-target run --build-tests main 7u32; then
     exit 1
 fi
 
-if rg -qi 'test_main|function.*main|does not exist' "$ARTIFACT_DIR/omitted-target.log"; then
+if grep -Eqi 'test_main|function.*main|does not exist' "$ARTIFACT_DIR/omitted-target.log"; then
     echo "AUDIT_RESULT=CONFIRMED root=C1 downstream=implicit-primary-run-rejected"
     exit 0
 fi
