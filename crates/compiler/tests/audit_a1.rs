@@ -37,7 +37,16 @@ fn echo_input(abi: &Value) -> &Value {
 }
 
 fn path(ty: &Value) -> Option<&Vec<Value>> {
-    ty.get("Plaintext")?.get("ty")?.get("Struct")?.get("path")?.as_array()
+    if let Some(path) = ty
+        .get("Plaintext")
+        .and_then(|plaintext| plaintext.get("ty"))
+        .and_then(|ty| ty.get("Struct"))
+        .and_then(|structure| structure.get("path"))
+        .and_then(Value::as_array)
+    {
+        return Some(path);
+    }
+    ty.get("Record")?.get("path")?.as_array()
 }
 
 const PROGRAM: &str = r#"
@@ -79,7 +88,10 @@ fn audit_a1_composite_path_identity() {
     );
 
     match target_path {
-        Some(path) if path == &vec![Value::String("Token".into())] && target_input.get("Record").is_some() => {
+        Some(path)
+            if path == &vec![Value::String("types".into()), Value::String("Token".into())]
+                && target_input.get("Record").is_some() =>
+        {
             println!("AUDIT_RESULT=CONFIRMED root=A1 downstream=abi-labels-module-struct-as-record");
         }
         Some(path)
