@@ -57,7 +57,7 @@ program abi_path.aleo {
 
 const TYPES: &str = r#"
 export struct Token {
-    value: u32,
+    amount: u32,
 }
 "#;
 
