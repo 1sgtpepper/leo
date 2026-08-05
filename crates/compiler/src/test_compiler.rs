@@ -313,7 +313,7 @@ fn audit_g1_cross_library_const_generic_interface() {
 // --- library: generic_shapes --- //
 
 export struct Slot::[N: u32] {
-    value: u32,
+    amount: u32,
 }
 
 export interface Storer {
@@ -324,7 +324,7 @@ export interface Storer {
 
 program consumer.aleo: generic_shapes::Storer {
     fn store(s: generic_shapes::Slot::[16u32]) -> u32 {
-        return s.value;
+        return s.amount;
     }
 
     @noupgrade
@@ -335,7 +335,7 @@ program consumer.aleo: generic_shapes::Storer {
     let matching = target.replace("[16u32]", "[8u32]");
     let same_program_mismatch = r#"
 export struct Slot::[N: u32] {
-    value: u32,
+    amount: u32,
 }
 
 export interface Storer {
@@ -344,7 +344,7 @@ export interface Storer {
 
 program consumer.aleo: Storer {
     fn store(s: Slot::[16u32]) -> u32 {
-        return s.value;
+        return s.amount;
     }
 
     @noupgrade
