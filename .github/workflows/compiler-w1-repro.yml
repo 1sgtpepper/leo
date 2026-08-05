@@ -1,0 +1,24 @@
+name: Compiler W1 Reproducer
+
+on:
+  push:
+    branches:
+      - ci/compiler-w1-repro
+
+permissions:
+  contents: read
+
+jobs:
+  reproducer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run native semantic-validation control
+        run: cargo test --locked -p leo-disassembler --lib rejects_future_typed_register_input_without_panic -- --nocapture
+      - name: Run isolated W1 WASM reproducer
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-pack --locked
+          wasm-pack test --node --release ci/w1-wasm-harness

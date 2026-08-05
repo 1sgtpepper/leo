@@ -1,0 +1,33 @@
+use std::panic::AssertUnwindSafe;
+
+use leo_aleo_abi_wasm::generate_abi_from_aleo;
+use wasm_bindgen_test::*;
+
+wasm_bindgen_test_configure!(run_in_node);
+
+const VICTIM: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../crates/disassembler/src/tests/victim_future_input.aleo"
+));
+const VALID: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../tests/tests/cli/test_abi_from_aleo/contents/simple.aleo"
+));
+
+#[wasm_bindgen_test]
+fn audit_w1_malformed_bytecode_validation_boundary() {
+    let observed = std::panic::catch_unwind(AssertUnwindSafe(|| generate_abi_from_aleo(VICTIM, "testnet")));
+    match observed {
+        Err(_) => println!("AUDIT_RESULT=CONFIRMED root=W1 downstream=wasm-host-panic"),
+        Ok(Err(error)) => println!("AUDIT_RESULT=DISPROVED root=W1 downstream=clean-wasm-error error={error:?}"),
+        Ok(Ok(abi)) => panic!(
+            "AUDIT_RESULT=CONFIRMED root=W1 downstream=malformed-bytecode-accepted abi={abi}"
+        ),
+    }
+}
+
+#[wasm_bindgen_test]
+fn audit_w1_valid_bytecode_control() {
+    let abi = generate_abi_from_aleo(VALID, "testnet").expect("valid bytecode ABI generation failed");
+    assert!(abi.contains("\"program\""), "valid ABI output missing program field: {abi}");
+}

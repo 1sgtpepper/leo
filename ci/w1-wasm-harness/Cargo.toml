@@ -1,0 +1,12 @@
+[package]
+name = "w1-wasm-harness"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+leo-aleo-abi-wasm = { path = "../../crates/leo-aleo-abi-wasm" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
