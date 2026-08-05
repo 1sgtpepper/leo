@@ -75,7 +75,7 @@ if run_case renamed-library "$LIBRARY_PACKAGE" deploy -y --print --skip-deploy-c
     exit 0
 fi
 
-if rg -qi 'base_lib|unresolved|not found|missing' "$ARTIFACT_DIR/renamed-library.log"; then
+if grep -Eqi 'base_lib|unresolved|not found|missing' "$ARTIFACT_DIR/renamed-library.log"; then
     echo "AUDIT_RESULT=CONFIRMED root=B1 downstream=renamed-library-deploy-rejected"
     exit 0
 fi
