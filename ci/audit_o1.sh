@@ -102,17 +102,17 @@ fi
 
 if ! jq -e '
     (.deployments | length == 2) and
-    (.[0].program_id == "first.aleo") and
-    (.[0].broadcast == null) and
-    (.[1].program_id == "second.aleo") and
-    (.[1].broadcast.confirmed == true)
+    (.deployments[0].program_id == "first.aleo") and
+    (.deployments[0].broadcast == null) and
+    (.deployments[1].program_id == "second.aleo") and
+    (.deployments[1].broadcast.confirmed == true)
   ' "$ARTIFACT_DIR/skip-first.json" >/dev/null; then
     if jq -e '
         (.deployments | length == 2) and
-        (.[0].program_id == "first.aleo") and
-        (.[0].broadcast.confirmed == true) and
-        (.[1].program_id == "second.aleo") and
-        (.[1].broadcast == null)
+        (.deployments[0].program_id == "first.aleo") and
+        (.deployments[0].broadcast.confirmed == true) and
+        (.deployments[1].program_id == "second.aleo") and
+        (.deployments[1].broadcast == null)
       ' "$ARTIFACT_DIR/skip-first.json" >/dev/null; then
         echo "AUDIT_RESULT=CONFIRMED root=O1 downstream=first-entry-received-second-broadcast"
         exit 0
