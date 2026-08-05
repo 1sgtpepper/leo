@@ -6,6 +6,8 @@ LEO="${ROOT}/target/ci/leo"
 WORKSPACE="$ROOT/ci/o1-workspace"
 ARTIFACT_DIR="${RUNNER_TEMP:?}/o1-artifacts"
 mkdir -p "$ARTIFACT_DIR"
+LEO_HOME="$ARTIFACT_DIR/leo-home"
+mkdir -p "$LEO_HOME"
 
 PRIVATE_KEY="APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH"
 ENDPOINT="http://127.0.0.1:3030"
@@ -40,7 +42,7 @@ run_deploy() {
     local output="$ARTIFACT_DIR/${name}.log"
     printf '%b' "$answers" | (
         cd "$WORKSPACE" || exit 125
-        "$LEO" --disable-update-check --json-output="$ARTIFACT_DIR/${name}.json" deploy --broadcast \
+        "$LEO" --disable-update-check --home "$LEO_HOME" --json-output="$ARTIFACT_DIR/${name}.json" deploy --broadcast \
             --network testnet --endpoint "$ENDPOINT" --private-key "$PRIVATE_KEY" \
             --consensus-heights "$CONSENSUS_HEIGHTS"
     ) >"$output" 2>&1
