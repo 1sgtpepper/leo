@@ -39,7 +39,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        if self.path.endswith("/transaction/broadcast"):
+        request_path = self.path.split("?", 1)[0]
+        if request_path.endswith("/transaction/broadcast"):
             type(self).broadcast_count += 1
             if type(self).broadcast_count == 1:
                 self.send_response(200)
