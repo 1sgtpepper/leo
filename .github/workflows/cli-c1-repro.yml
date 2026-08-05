@@ -1,0 +1,27 @@
+name: CLI C1 Reproducer
+
+on:
+  push:
+    branches:
+      - ci/cli-c1-repro
+
+permissions:
+  contents: read
+
+jobs:
+  reproducer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI for isolated C1 reproducer
+        run: cargo build --locked -p leo-lang --profile ci --features noconfig
+      - name: Run isolated C1 reproducer
+        run: bash ci/audit_c1.sh
+      - name: Upload C1 reproducer logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c1-reproducer-logs
+          path: ${{ runner.temp }}/c1-artifacts
