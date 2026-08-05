@@ -3,8 +3,6 @@ use std::panic::AssertUnwindSafe;
 use leo_aleo_abi_wasm::generate_abi_from_aleo;
 use wasm_bindgen_test::*;
 
-wasm_bindgen_test_configure!(run_in_node);
-
 const VICTIM: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../crates/disassembler/src/tests/victim_future_input.aleo"
