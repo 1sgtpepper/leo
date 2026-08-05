@@ -305,3 +305,80 @@ fn abi_runner(source: &str) -> String {
 fn test_interface_abi() {
     leo_test_framework::run_tests("interface_abi", abi_runner);
 }
+
+#[test]
+#[serial]
+fn audit_f1_module_qualified_interface_record() {
+    let target = r#"
+// --- library: ops_lib --- //
+
+// --- Next Module: algorithms.leo --- //
+
+export interface Processor {
+    record Token {
+        owner: address,
+        ..
+    }
+
+    fn process(t: Token) -> Token;
+}
+
+// --- Next Program --- //
+
+program impl_ops.aleo : ops_lib::algorithms::Processor {
+    record Token {
+        owner: address,
+        balance: u64,
+    }
+
+    fn process(t: Token) -> Token {
+        return Token { owner: t.owner, balance: t.balance * 2u64 };
+    }
+
+    fn mint(balance: u64) -> Token {
+        return Token { owner: std::ctx::signer(), balance };
+    }
+
+    @noupgrade
+    constructor() {}
+}
+
+// --- Next Program --- //
+
+import impl_ops.aleo;
+
+program caller.aleo {
+    fn call_process(target: field, balance: u64) -> u64 {
+        let token: dyn record = impl_ops.aleo::mint(balance) as dyn record;
+        let result: dyn record =
+            ops_lib::algorithms::Processor@(target)::process(token);
+        return result.balance;
+    }
+
+    @noupgrade
+    constructor() {}
+}
+"#;
+
+    let control = target
+        .replace("ops_lib::algorithms::Processor", "ops_lib::Processor")
+        .replace("// --- Next Module: algorithms.leo --- //", "")
+        .replace("export interface Processor", "export interface Processor");
+
+    let control_output = run_with_stub(StubType::FromLeo, &control);
+    assert!(
+        control_output.contains("dynamic.record") && control_output.contains("call.dynamic"),
+        "root-interface control did not emit a dynamic-record call:\n{control_output}"
+    );
+
+    let target_output = run_with_stub(StubType::FromLeo, target);
+    if target_output.contains("dynamic call argument has record type")
+        && target_output.contains("require `dyn record`")
+    {
+        println!("AUDIT_RESULT=CONFIRMED root=F1 downstream=dynamic-record-call-rejected");
+    } else if target_output.contains("dynamic.record") && target_output.contains("call.dynamic") {
+        println!("AUDIT_RESULT=DISPROVED root=F1 downstream=dynamic-record-call-emitted");
+    } else {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=F1 unexpected compiler output:\n{target_output}");
+    }
+}
