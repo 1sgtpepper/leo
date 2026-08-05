@@ -70,7 +70,7 @@ fn audit_f2_inherited_dynamic_member_lookup() {
     assert!(parent.contains("call.dynamic") && parent.contains("'get_value'"));
 
     match compile(&target) {
-        Err(error) if error.contains("get_value") && error.contains("not found") => {
+        Err(error) if error.contains("get_value") && (error.contains("not found") || error.contains("unknown function")) => {
             println!("AUDIT_RESULT=CONFIRMED root=F2 downstream=dynamic-call-rejected");
         }
         Ok(bytecode) if bytecode.contains("call.dynamic") && bytecode.contains("'get_value'") => {
