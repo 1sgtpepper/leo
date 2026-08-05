@@ -305,3 +305,89 @@ fn abi_runner(source: &str) -> String {
 fn test_interface_abi() {
     leo_test_framework::run_tests("interface_abi", abi_runner);
 }
+
+#[test]
+#[serial]
+fn audit_g1_cross_library_const_generic_interface() {
+    let target = r#"
+// --- library: generic_shapes --- //
+
+export struct Slot::[N: u32] {
+    value: u32,
+}
+
+export interface Storer {
+    fn store(s: Slot::[8u32]) -> u32;
+}
+
+// --- Next Program --- //
+
+program consumer.aleo: generic_shapes::Storer {
+    fn store(s: generic_shapes::Slot::[16u32]) -> u32 {
+        return s.value;
+    }
+
+    @noupgrade
+    constructor() {}
+}
+"#;
+
+    let matching = target.replace("[16u32]", "[8u32]");
+    let same_program_mismatch = r#"
+export struct Slot::[N: u32] {
+    value: u32,
+}
+
+export interface Storer {
+    fn store(s: Slot::[8u32]) -> u32;
+}
+
+program consumer.aleo: Storer {
+    fn store(s: Slot::[16u32]) -> u32 {
+        return s.value;
+    }
+
+    @noupgrade
+    constructor() {}
+}
+"#;
+    let primitive_mismatch = r#"
+export interface Storer {
+    fn store(s: u32) -> u32;
+}
+
+program consumer.aleo: Storer {
+    fn store(s: u64) -> u32 {
+        return 0u32;
+    }
+
+    @noupgrade
+    constructor() {}
+}
+"#;
+
+    let matching_output = run_with_stub(StubType::FromLeo, &matching);
+    assert!(
+        matching_output.contains("program consumer.aleo;") && matching_output.contains("function store:"),
+        "matching cross-library control did not compile:\n{matching_output}"
+    );
+
+    for (name, source) in [("same-program", same_program_mismatch), ("primitive", primitive_mismatch)] {
+        let output = run_with_stub(StubType::FromLeo, source);
+        assert!(
+            output.contains("does not match the signature required by interface"),
+            "{name} mismatch control did not produce the interface diagnostic:\n{output}"
+        );
+    }
+
+    let target_output = run_with_stub(StubType::FromLeo, target);
+    if target_output.contains("program consumer.aleo;") && target_output.contains("function store:") {
+        println!("AUDIT_RESULT=CONFIRMED root=G1 downstream=invalid-interface-bytecode-emitted");
+    } else if target_output.contains("does not match the signature required by interface")
+        && target_output.contains("generic_shapes")
+    {
+        println!("AUDIT_RESULT=DISPROVED root=G1 downstream=interface-mismatch-rejected");
+    } else {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=G1 unexpected compiler output:\n{target_output}");
+    }
+}

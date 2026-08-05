@@ -1,0 +1,19 @@
+name: Compiler G1 Reproducer
+
+on:
+  push:
+    branches:
+      - ci/compiler-g1-repro
+
+permissions:
+  contents: read
+
+jobs:
+  reproducer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run isolated G1 reproducer
+        run: cargo test --locked -p leo-compiler --lib test_compiler::audit_g1_cross_library_const_generic_interface -- --nocapture
