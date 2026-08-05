@@ -372,10 +372,10 @@ program caller.aleo {
     );
 
     let target_output = run_with_stub(StubType::FromLeo, target);
-    if target_output.contains("dynamic call argument has record type")
-        && target_output.contains("require `dyn record`")
+    if target_output.contains("expected type `Token`, but type `dyn record` was found")
+        && target_output.contains("expected type `dyn record`, found type `Token`")
     {
-        println!("AUDIT_RESULT=CONFIRMED root=F1 downstream=dynamic-record-call-rejected");
+        println!("AUDIT_RESULT=CONFIRMED root=F1 downstream=module-qualified-record-call-rejected");
     } else if target_output.contains("dynamic.record") && target_output.contains("call.dynamic") {
         println!("AUDIT_RESULT=DISPROVED root=F1 downstream=dynamic-record-call-emitted");
     } else {
