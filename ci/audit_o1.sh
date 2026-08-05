@@ -40,12 +40,10 @@ run_deploy() {
     local name="$1"
     local answers="$2"
     local output="$ARTIFACT_DIR/${name}.log"
-    printf '%b' "$answers" | (
-        cd "$WORKSPACE" || exit 125
-        "$LEO" --disable-update-check --home "$LEO_HOME" --json-output="$ARTIFACT_DIR/${name}.json" deploy --broadcast \
-            --network testnet --endpoint "$ENDPOINT" --private-key "$PRIVATE_KEY" \
-            --consensus-heights "$CONSENSUS_HEIGHTS"
-    ) >"$output" 2>&1
+    local command
+    printf -v command 'cd %q && %q --disable-update-check --home %q --json-output=%q deploy --broadcast --network testnet --endpoint %q --private-key %q --consensus-heights %q' \
+        "$WORKSPACE" "$LEO" "$LEO_HOME" "$ARTIFACT_DIR/${name}.json" "$ENDPOINT" "$PRIVATE_KEY" "$CONSENSUS_HEIGHTS"
+    printf '%b' "$answers" | script -q -e -c "$command" /dev/null >"$output" 2>&1
     local status=$?
     echo "$status" >"$ARTIFACT_DIR/${name}.status"
     return "$status"
@@ -91,7 +89,7 @@ if ! jq -e '
     exit 1
 fi
 
-if ! jq -e '(.deployments | length == 2) and (.[].broadcast.confirmed == true)' "$ARTIFACT_DIR/all-confirmed.json" >/dev/null; then
+if ! jq -e '(.deployments | length == 2) and all(.deployments[]; .broadcast.confirmed == true)' "$ARTIFACT_DIR/all-confirmed.json" >/dev/null; then
     echo "AUDIT_RESULT=INCONCLUSIVE root=O1 reason=all-confirmed-json-control-failed"
     exit 1
 fi
