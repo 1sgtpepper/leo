@@ -1,5 +1,5 @@
 use leo_ast::{NetworkName, NodeBuilder};
-use leo_compiler::{Compiler, CompilerOptions, EvaluationStatus, run};
+use leo_compiler::{Compiler, CompilerOptions, run};
 use leo_errors::Handler;
 use leo_span::source_map::FileName;
 
@@ -43,7 +43,7 @@ fn compile_and_run(source: &str) -> Result<String, String> {
         .into_iter()
         .next()
         .ok_or_else(|| "downstream evaluator returned no outcome".to_string())?;
-    if !matches!(outcome.status, EvaluationStatus::Success) {
+    if !matches!(outcome.status, run::EvaluationStatus::Success) {
         return Err(format!("downstream evaluation status: {}", outcome.status));
     }
     Ok(outcome.output().to_string())
