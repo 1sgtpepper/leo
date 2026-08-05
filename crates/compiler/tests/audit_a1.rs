@@ -3,26 +3,28 @@ use std::rc::Rc;
 use leo_ast::{NetworkName, NodeBuilder};
 use leo_compiler::{Compiler, CompilerOptions};
 use leo_errors::Handler;
-use leo_span::source_map::FileName;
+use leo_span::{create_session_if_not_set_then, source_map::FileName};
 use serde_json::Value;
 
 fn compile(source: &str, module_source: &str) -> Result<Value, String> {
-    let (handler, emitter) = Handler::new_with_buf();
-    let mut compiler = Compiler::new(
-        Some("abi_path.aleo".to_string()),
-        false,
-        handler,
-        Rc::new(NodeBuilder::default()),
-        Some(CompilerOptions::default()),
-        indexmap::IndexMap::new(),
-        NetworkName::TestnetV0,
-    );
-    let modules = vec![(module_source, FileName::Custom("types.leo".into()))];
+    create_session_if_not_set_then(|_| {
+        let (handler, emitter) = Handler::new_with_buf();
+        let mut compiler = Compiler::new(
+            Some("abi_path.aleo".to_string()),
+            false,
+            handler,
+            Rc::new(NodeBuilder::default()),
+            Some(CompilerOptions::default()),
+            indexmap::IndexMap::new(),
+            NetworkName::TestnetV0,
+        );
+        let modules = vec![(module_source, FileName::Custom("types.leo".into()))];
 
-    compiler
-        .compile(source, FileName::Custom("main.leo".into()), &modules)
-        .map(|compiled| serde_json::to_value(compiled.primary.abi).expect("ABI is serializable"))
-        .map_err(|error| format!("{error}; diagnostics: {:?}", emitter.extract_errs()))
+        compiler
+            .compile(source, FileName::Custom("main.leo".into()), &modules)
+            .map(|compiled| serde_json::to_value(compiled.primary.abi).expect("ABI is serializable"))
+            .map_err(|error| format!("{error}; diagnostics: {:?}", emitter.extract_errs()))
+    })
 }
 
 fn echo_input(abi: &Value) -> &Value {
