@@ -6,12 +6,14 @@ LEO="${ROOT}/target/ci/leo"
 PACKAGE="$ROOT/ci/c1-package"
 ARTIFACT_DIR="${RUNNER_TEMP:?}/c1-artifacts"
 mkdir -p "$ARTIFACT_DIR"
+LEO_HOME="$ARTIFACT_DIR/leo-home"
+mkdir -p "$LEO_HOME"
 
 run_case() {
     local name="$1"
     shift
     local output="$ARTIFACT_DIR/${name}.log"
-    (cd "$PACKAGE" && "$LEO" --disable-update-check --json-output="$ARTIFACT_DIR/${name}.json" "$@") >"$output" 2>&1
+    (cd "$PACKAGE" && "$LEO" --disable-update-check --home "$LEO_HOME" --json-output="$ARTIFACT_DIR/${name}.json" "$@") >"$output" 2>&1
     local status=$?
     echo "$status" >"$ARTIFACT_DIR/${name}.status"
     return "$status"
