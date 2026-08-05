@@ -926,6 +926,168 @@ fn definition_resolves_saved_local_source_dependency_target() {
     assert!(status.success(), "stderr:\n{stderr}");
 }
 
+/// Verifies an unsaved external dependency overlay participates in consumer analysis.
+#[test]
+fn audit_l1_unsaved_external_dependency_overlay() {
+    let tempdir = tempdir().expect("tempdir");
+    let helper_root = tempdir.path().join("helper");
+    let helper_src = helper_root.join("src");
+    fs::create_dir_all(&helper_src).expect("create helper source dir");
+    fs::write(
+        helper_root.join("program.json"),
+        r#"{ "program": "helper.aleo", "version": "0.1.0", "description": "", "license": "MIT", "leo": "4.0.0" }"#,
+    )
+    .expect("write helper manifest");
+    let helper_source = concat!(
+        "program helper.aleo {\n",
+        "    fn original(x: u32) -> u32 {\n",
+        "        return x;\n",
+        "    }\n",
+        "    @noupgrade constructor() {}\n",
+        "}\n",
+    );
+    let helper_overlay = concat!(
+        "program helper.aleo {\n",
+        "    fn replacement(x: u32) -> u32 {\n",
+        "        return x;\n",
+        "    }\n",
+        "    @noupgrade constructor() {}\n",
+        "}\n",
+    );
+    let helper_path = helper_src.join("main.leo");
+    fs::write(&helper_path, helper_source).expect("write helper source");
+    let helper_root = helper_root.canonicalize().expect("canonical helper root");
+    let helper_uri = file_uri(&helper_path.canonicalize().expect("canonical helper source"));
+
+    let consumer_root = tempdir.path().join("consumer");
+    let consumer_src = consumer_root.join("src");
+    fs::create_dir_all(&consumer_src).expect("create consumer source dir");
+    fs::write(
+        consumer_root.join("program.json"),
+        json!({
+            "program": "demo.aleo",
+            "version": "0.1.0",
+            "description": "",
+            "license": "MIT",
+            "leo": "4.0.0",
+            "dependencies": [{ "name": "helper.aleo", "location": "local", "path": helper_root }]
+        })
+        .to_string(),
+    )
+    .expect("write consumer manifest");
+    let consumer_source = concat!(
+        "import helper.aleo;\n\n",
+        "program demo.aleo {\n",
+        "    fn main(x: u32) -> u32 {\n",
+        "        return helper.aleo::original(x);\n",
+        "    }\n",
+        "    @noupgrade constructor() {}\n",
+        "}\n",
+    );
+    let consumer_replacement = consumer_source.replace("helper.aleo::original", "helper.aleo::replacement");
+    let consumer_path = consumer_src.join("main.leo");
+    fs::write(&consumer_path, consumer_source).expect("write consumer source");
+    let consumer_uri = file_uri(&consumer_path);
+
+    let mut server = TestServer::spawn(&[("RUST_LOG", "debug")]);
+    initialize(&mut server);
+    server.notify("initialized", json!({}));
+    open_document(&mut server, &consumer_uri, consumer_source);
+    assert!(
+        server.wait_for_stderr_contains("worker completed latest document", Duration::from_secs(30)),
+        "consumer baseline did not finish: {}",
+        server.stderr_contents()
+    );
+
+    let baseline = server.request(
+        2,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": consumer_uri },
+            "position": position_json(consumer_source, "original", 0),
+        }),
+    );
+    if baseline["result"][0]["uri"] != json!(helper_uri.to_string()) {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=L1 baseline definition failed: {baseline}");
+    }
+    server.take_notifications();
+
+    // Keep the disk source unchanged; only the helper's editor buffer changes.
+    let helper_document_uri = helper_uri.clone();
+    open_document(&mut server, &helper_document_uri, helper_overlay);
+    assert!(
+        server.wait_for_stderr_contains("worker completed latest document", Duration::from_secs(30)),
+        "helper overlay did not finish: {}",
+        server.stderr_contents()
+    );
+
+    let helper_overlay_definition = server.request(
+        3,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": helper_document_uri },
+            "position": position_json(helper_overlay, "replacement", 0),
+        }),
+    );
+    if helper_overlay_definition["result"][0]["uri"] != json!(helper_uri.to_string()) {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=L1 helper overlay was not indexed: {helper_overlay_definition}");
+    }
+
+    let stale_definition = server.request(
+        4,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": consumer_uri },
+            "position": position_json(consumer_source, "original", 0),
+        }),
+    );
+    let stale_original = stale_definition["result"][0]["uri"] == json!(helper_uri.to_string());
+    server.take_notifications();
+
+    server.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": consumer_uri, "version": 2 },
+            "contentChanges": [{ "text": consumer_replacement }]
+        }),
+    );
+    assert!(
+        server.wait_for_stderr_contains("worker completed latest document", Duration::from_secs(30)),
+        "consumer replacement did not finish: {}",
+        server.stderr_contents()
+    );
+    let replacement_definition = server.request(
+        5,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": consumer_uri },
+            "position": position_json(&consumer_replacement, "replacement", 0),
+        }),
+    );
+    let replacement_resolves = replacement_definition["result"][0]["uri"] == json!(helper_uri.to_string());
+    let diagnostics = server
+        .recv_notification("textDocument/publishDiagnostics", Duration::from_secs(10))
+        .map(|notification| notification.to_string())
+        .unwrap_or_default();
+    let replacement_is_unknown = diagnostics.contains("replacement") && diagnostics.contains("unknown");
+
+    let shutdown = server.request(6, "shutdown", Value::Null);
+    assert_eq!(shutdown["result"], Value::Null);
+    server.notify("exit", json!({}));
+    let (status, stderr) = server.finish();
+    assert!(status.success(), "stderr:\n{stderr}");
+
+    if replacement_resolves && !replacement_is_unknown {
+        println!("AUDIT_RESULT=DISPROVED root=L1 downstream=overlay-reanalyzed");
+    } else if stale_original || replacement_is_unknown || !replacement_resolves {
+        println!(
+            "AUDIT_RESULT=CONFIRMED root=L1 downstream=consumer-stale-or-overlay-missing stale_original={stale_original} replacement_resolves={replacement_resolves}"
+        );
+    } else {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=L1 definition={replacement_definition} diagnostics={diagnostics}");
+    }
+}
+
 /// Verifies an import name resolves to the imported local program source.
 #[test]
 fn definition_resolves_imported_program_target() {

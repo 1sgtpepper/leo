@@ -1,0 +1,19 @@
+name: LSP L1 Reproducer
+
+on:
+  push:
+    branches:
+      - ci/lsp-l1-repro
+
+permissions:
+  contents: read
+
+jobs:
+  reproducer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run isolated L1 reproducer
+        run: cargo test --locked -p leo-lsp --test protocol audit_l1_unsaved_external_dependency_overlay -- --nocapture
