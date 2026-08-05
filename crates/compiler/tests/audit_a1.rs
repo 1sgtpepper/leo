@@ -41,11 +41,11 @@ fn path(ty: &Value) -> Option<&Vec<Value>> {
 }
 
 const PROGRAM: &str = r#"
-record Token {
-    owner: address,
-}
-
 program abi_path.aleo {
+    record Token {
+        owner: address,
+    }
+
     fn echo(v: types::Token) -> types::Token {
         return v;
     }
