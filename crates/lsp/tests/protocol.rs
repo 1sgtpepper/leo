@@ -926,6 +926,143 @@ fn definition_resolves_saved_local_source_dependency_target() {
     assert!(status.success(), "stderr:\n{stderr}");
 }
 
+/// Verifies source-dependency analysis preserves external module definitions.
+#[test]
+fn audit_l2_source_dependency_module_projection() {
+    let tempdir = tempdir().expect("tempdir");
+
+    let helper_root = tempdir.path().join("helper");
+    let helper_src = helper_root.join("src");
+    fs::create_dir_all(&helper_src).expect("create helper source dir");
+    fs::write(
+        helper_root.join("program.json"),
+        r#"{ "program": "helper.aleo", "version": "0.1.0", "description": "", "license": "MIT", "leo": "4.0.0" }"#,
+    )
+    .expect("write helper manifest");
+    let helper_source = concat!(
+        "program helper.aleo {\n",
+        "    fn double(x: u32) -> u32 {\n",
+        "        return x + x;\n",
+        "    }\n",
+        "    @noupgrade constructor() {}\n",
+        "}\n",
+    );
+    let helper_module = concat!(
+        "export fn blend(x: u32, y: u32) -> u32 {\n",
+        "    return (x + y) / 2u32;\n",
+        "}\n",
+    );
+    let helper_path = helper_src.join("main.leo");
+    let helper_module_path = helper_src.join("colors.leo");
+    fs::write(&helper_path, helper_source).expect("write helper source");
+    fs::write(&helper_module_path, helper_module).expect("write helper module");
+    let helper_root = helper_root.canonicalize().expect("canonical helper root");
+    let helper_uri = file_uri(&helper_path.canonicalize().expect("canonical helper source"));
+    let helper_module_uri = file_uri(&helper_module_path.canonicalize().expect("canonical helper module"));
+
+    let consumer_root = tempdir.path().join("consumer");
+    let consumer_src = consumer_root.join("src");
+    fs::create_dir_all(&consumer_src).expect("create consumer source dir");
+    fs::write(
+        consumer_root.join("program.json"),
+        json!({
+            "program": "demo.aleo",
+            "version": "0.1.0",
+            "description": "",
+            "license": "MIT",
+            "leo": "4.0.0",
+            "dependencies": [{ "name": "helper.aleo", "location": "local", "path": helper_root }]
+        })
+        .to_string(),
+    )
+    .expect("write consumer manifest");
+    let consumer_source = concat!(
+        "import helper.aleo;\n\n",
+        "program demo.aleo {\n",
+        "    fn main(x: u32) -> u32 {\n",
+        "        return helper.aleo::double(x);\n",
+        "    }\n",
+        "    @noupgrade constructor() {}\n",
+        "}\n",
+    );
+    let consumer_module_call = consumer_source.replace(
+        "helper.aleo::double(x)",
+        "helper.aleo::colors::blend(x, x)",
+    );
+    let consumer_path = consumer_src.join("main.leo");
+    fs::write(&consumer_path, consumer_source).expect("write consumer source");
+    let consumer_uri = file_uri(&consumer_path);
+
+    let mut server = TestServer::spawn(&[("RUST_LOG", "debug")]);
+    initialize(&mut server);
+    server.notify("initialized", json!({}));
+    open_document(&mut server, &consumer_uri, consumer_source);
+    assert!(
+        server.wait_for_stderr_contains("worker completed latest document", Duration::from_secs(30)),
+        "consumer baseline did not finish: {}",
+        server.stderr_contents()
+    );
+
+    let baseline = server.request(
+        2,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": consumer_uri },
+            "position": position_json(consumer_source, "double", 0),
+        }),
+    );
+    if baseline["result"][0]["uri"] != json!(helper_uri.to_string()) {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=L2 baseline definition failed: {baseline}");
+    }
+    server.take_notifications();
+
+    server.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": consumer_uri, "version": 2 },
+            "contentChanges": [{ "text": consumer_module_call }]
+        }),
+    );
+    assert!(
+        server.wait_for_stderr_contains("worker completed latest document", Duration::from_secs(30)),
+        "consumer module call did not finish: {}",
+        server.stderr_contents()
+    );
+    let module_definition = server.request(
+        3,
+        "textDocument/definition",
+        json!({
+            "textDocument": { "uri": consumer_uri },
+            "position": position_json(&consumer_module_call, "blend", 0),
+        }),
+    );
+    let module_resolves = module_definition["result"][0]["uri"] == json!(helper_module_uri.to_string());
+    let notifications = server.take_notifications();
+    let diagnostics = notifications
+        .iter()
+        .filter(|notification| notification["method"] == "textDocument/publishDiagnostics")
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let module_is_unknown = diagnostics.contains("colors") || diagnostics.contains("blend");
+
+    let shutdown = server.request(4, "shutdown", Value::Null);
+    assert_eq!(shutdown["result"], Value::Null);
+    server.notify("exit", json!({}));
+    let (status, stderr) = server.finish();
+    assert!(status.success(), "stderr:\n{stderr}");
+
+    if module_resolves {
+        println!("AUDIT_RESULT=DISPROVED root=L2 downstream=external-module-definition-resolved");
+    } else if module_is_unknown || module_definition["result"].is_null() {
+        println!(
+            "AUDIT_RESULT=CONFIRMED root=L2 downstream=external-module-definition-missing module_resolves={module_resolves}"
+        );
+    } else {
+        panic!("AUDIT_RESULT=INCONCLUSIVE root=L2 definition={module_definition} diagnostics={diagnostics}");
+    }
+}
+
 /// Verifies an import name resolves to the imported local program source.
 #[test]
 fn definition_resolves_imported_program_target() {
