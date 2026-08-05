@@ -21,4 +21,4 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --locked
-          wasm-pack test --node --release ci/w1-wasm-harness
+          wasm-pack test --node --release ci/w1-wasm-harness -- --nocapture
