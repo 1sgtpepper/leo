@@ -3,7 +3,7 @@ use leo_compiler::{Compiler, CompilerOptions, run};
 use leo_errors::Handler;
 use leo_span::source_map::FileName;
 
-fn compile_and_run(source: &str) -> Result<String, String> {
+fn compile_and_run(source: &str, collided: bool) -> Result<String, String> {
     let (handler, emitter) = Handler::new_with_buf();
     let mut compiler = Compiler::new(
         Some("name_only.aleo".to_string()),
@@ -14,13 +14,18 @@ fn compile_and_run(source: &str) -> Result<String, String> {
         indexmap::IndexMap::new(),
         NetworkName::TestnetV0,
     );
-    let modules = vec![
+    let (base, nested) = if collided {
         (
             "export fn add(X: u32) -> u32 { return X + nested::X; }",
-            FileName::Custom("base.leo".into()),
-        ),
-        ("export const X: u32 = 7u32;", FileName::Custom("base/nested.leo".into())),
-    ];
+            "export const X: u32 = 7u32;",
+        )
+    } else {
+        (
+            "export fn add(X: u32) -> u32 { return X + nested::Y; }",
+            "export const Y: u32 = 7u32;",
+        )
+    };
+    let modules = vec![(base, FileName::Custom("base.leo".into())), (nested, FileName::Custom("base/nested.leo".into()))];
 
     let compiled = compiler
         .compile(source, FileName::Custom("name_only.leo".into()), &modules)
@@ -49,8 +54,8 @@ fn compile_and_run(source: &str) -> Result<String, String> {
     Ok(outcome.output().to_string())
 }
 
-fn audit_case(label: &str, source: &str) -> Result<String, String> {
-    compile_and_run(source).map_err(|error| format!("{label}: {error}"))
+fn audit_case(label: &str, source: &str, collided: bool) -> Result<String, String> {
+    compile_and_run(source, collided).map_err(|error| format!("{label}: {error}"))
 }
 
 #[test]
@@ -65,12 +70,10 @@ program name_only.aleo {
     constructor() {}
 }
 "#;
-    let control = target.replace("nested::X", "nested::Y").replace("const X", "const Y");
-
-    let control_output = audit_case("control", &control).expect("control must compile and evaluate");
+    let control_output = audit_case("control", target, false).expect("control must compile and evaluate");
     assert_eq!(control_output, "12u32", "control downstream oracle changed");
 
-    match audit_case("target", target) {
+    match audit_case("target", target, true) {
         Ok(output) if output == "10u32" => {
             println!("AUDIT_RESULT=CONFIRMED root=M1 target_output={output} control_output={control_output}");
         }
