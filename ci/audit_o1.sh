@@ -100,6 +100,7 @@ if ! run_deploy all-confirmed; then
     exit 1
 fi
 
+TARGET_RESULT="DISPROVED"
 if ! jq -e '
     (.deployments | length == 2) and
     (.deployments[0].program_id == "first.aleo") and
@@ -114,16 +115,21 @@ if ! jq -e '
         (.deployments[1].program_id == "second.aleo") and
         (.deployments[1].broadcast == null)
       ' "$ARTIFACT_DIR/skip-first.json" >/dev/null; then
-        echo "AUDIT_RESULT=CONFIRMED root=O1 downstream=first-entry-received-second-broadcast"
-        exit 0
+        TARGET_RESULT="CONFIRMED"
+    else
+        echo "AUDIT_RESULT=INCONCLUSIVE root=O1 reason=skip-first-json-not-decisive"
+        exit 1
     fi
-    echo "AUDIT_RESULT=INCONCLUSIVE root=O1 reason=skip-first-json-not-decisive"
-    exit 1
 fi
 
 if ! jq -e '(.deployments | length == 2) and all(.deployments[]; .broadcast.confirmed == true)' "$ARTIFACT_DIR/all-confirmed.json" >/dev/null; then
     echo "AUDIT_RESULT=INCONCLUSIVE root=O1 reason=all-confirmed-json-control-failed"
     exit 1
+fi
+
+if [[ "$TARGET_RESULT" == "CONFIRMED" ]]; then
+    echo "AUDIT_RESULT=CONFIRMED root=O1 downstream=first-entry-received-second-broadcast"
+    exit 0
 fi
 
 echo "AUDIT_RESULT=DISPROVED root=O1 downstream=skip-metadata-preserved"
