@@ -1,0 +1,19 @@
+name: Compiler M1 Reproducer
+
+on:
+  push:
+    branches:
+      - ci/compiler-m1-repro
+
+permissions:
+  contents: read
+
+jobs:
+  reproducer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run isolated M1 reproducer
+        run: cargo test --locked -p leo-compiler --test audit_m1 -- --nocapture
