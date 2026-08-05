@@ -3,24 +3,26 @@ use std::rc::Rc;
 use leo_ast::{NetworkName, NodeBuilder};
 use leo_compiler::{Compiler, CompilerOptions};
 use leo_errors::Handler;
-use leo_span::source_map::FileName;
+use leo_span::{create_session_if_not_set_then, source_map::FileName};
 
 fn compile(source: &str) -> Result<String, String> {
-    let (handler, emitter) = Handler::new_with_buf();
-    let mut compiler = Compiler::new(
-        Some("test.aleo".to_string()),
-        false,
-        handler,
-        Rc::new(NodeBuilder::default()),
-        Some(CompilerOptions::default()),
-        indexmap::IndexMap::new(),
-        NetworkName::TestnetV0,
-    );
+    create_session_if_not_set_then(|_| {
+        let (handler, emitter) = Handler::new_with_buf();
+        let mut compiler = Compiler::new(
+            Some("test.aleo".to_string()),
+            false,
+            handler,
+            Rc::new(NodeBuilder::default()),
+            Some(CompilerOptions::default()),
+            indexmap::IndexMap::new(),
+            NetworkName::TestnetV0,
+        );
 
-    compiler
-        .compile(source, FileName::Custom("audit_f2.leo".into()), &Vec::new())
-        .map(|compiled| compiled.primary.bytecode)
-        .map_err(|error| format!("{error}; diagnostics: {:?}", emitter.extract_errs()))
+        compiler
+            .compile(source, FileName::Custom("audit_f2.leo".into()), &Vec::new())
+            .map(|compiled| compiled.primary.bytecode)
+            .map_err(|error| format!("{error}; diagnostics: {:?}", emitter.extract_errs()))
+    })
 }
 
 const BASE: &str = r#"
