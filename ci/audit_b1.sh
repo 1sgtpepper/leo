@@ -5,6 +5,8 @@ ROOT="${GITHUB_WORKSPACE:?}"
 LEO="${ROOT}/target/ci/leo"
 ARTIFACT_DIR="${RUNNER_TEMP:?}/b1-artifacts"
 mkdir -p "$ARTIFACT_DIR"
+LEO_HOME="$ARTIFACT_DIR/leo-home"
+mkdir -p "$LEO_HOME"
 
 PRIVATE_KEY="APrivateKey1zkp8CZNn3yeCseEtxuVPbDCwSyhGW6yZKUYKfgXmcpoGPWH"
 ENDPOINT="http://127.0.0.1:3030"
@@ -37,7 +39,7 @@ run_case() {
     local output="$ARTIFACT_DIR/${name}.log"
     (
         cd "$directory" || exit 125
-        "$LEO" --disable-update-check "$@"
+        "$LEO" --disable-update-check --home "$LEO_HOME" "$@"
     ) >"$output" 2>&1
     local status=$?
     echo "$status" >"$ARTIFACT_DIR/${name}.status"
