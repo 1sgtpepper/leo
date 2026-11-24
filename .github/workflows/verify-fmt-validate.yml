@@ -1,8 +1,11 @@
-name: Verify leo#29625 fmt-validate and CLI fixture
+name: Verify Leo 29625 fmt fix
 
 on:
   push:
     branches: [verify-leo-29625-fmt-fix]
+
+permissions:
+  contents: read
 
 env:
   CARGO_INCREMENTAL: '0'
