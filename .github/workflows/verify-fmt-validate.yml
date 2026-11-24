@@ -1,0 +1,41 @@
+name: Verify leo#29625 fmt-validate and CLI fixture
+
+on:
+  push:
+    branches: [verify-leo-29625-fmt-fix]
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
+jobs:
+  fmt-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+        with:
+          cache-key: fmt-validate
+          nextest: 'true'
+      - name: Run leo-fmt unit tests and check fixture formatting
+        run: |
+          cargo test -p leo-fmt --locked
+          cargo run -p leo-fmt --locked -- --check \
+            tests/tests/cli/test_interface_abi_from_library/contents/my_lib/src/lib.leo \
+            tests/expectations/cli/test_interface_abi_from_library/contents/my_lib/src/lib.leo
+      - name: Validate formatter semantics
+        run: |
+          cargo nextest run -p leo-fmt --locked --cargo-profile ci --features validate \
+            -E 'test(/validate_/) - test(validate_ast_equivalence_repos)'
+      - name: Verify test_interface_abi_from_library CLI commands
+        run: |
+          cargo build --locked --cargo-profile ci -p leo-lang --features only_testnet --bin leo
+          LEO_BIN="$PWD/target/ci/leo"
+          TMP=$(mktemp -d)
+          cp -R tests/tests/cli/test_interface_abi_from_library/contents "$TMP/contents"
+          (cd "$TMP/contents" && "$PWD/tests/tests/cli/test_interface_abi_from_library/COMMANDS" "$LEO_BIN") > "$TMP/out.txt"
+          diff -u tests/expectations/cli/test_interface_abi_from_library/STDOUT "$TMP/out.txt"
